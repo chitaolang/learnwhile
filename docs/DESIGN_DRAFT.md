@@ -1,7 +1,13 @@
-# LearnWhile Specification (Draft v1.1)
+# LearnWhile Specification (Draft v2)
 
-> A terminal-native spaced repetition learning system optimized for
-> developer idle time.
+> A terminal-native spaced repetition learning system that turns the time a
+> developer spends waiting on an AI coding agent into short bursts of review.
+
+Vocabulary in this document follows the glossary in [`/CONTEXT.md`](../CONTEXT.md).
+Load-bearing decisions are recorded as ADRs under [`docs/adr/`](./adr/) and are
+cited inline as ADR-NNNN.
+
+---
 
 ## 1. Vision
 
@@ -9,191 +15,201 @@ LearnWhile helps developers turn AI waiting time into focused learning.
 
 The project is **Anki-compatible, not Anki-dependent**.
 
-------------------------------------------------------------------------
+---
 
 ## 2. Design Philosophy
 
--   Learning Engine is the core.
--   Runtime is independent from learning logic.
--   Event-driven architecture.
--   Fail-open by default.
--   Learning Contracts are optional.
--   Analytics measures outcomes, not behavior.
+- The Learning Engine is the core; the runtime is independent of learning logic.
+- Event-driven: the Runtime routes Triggers and review events between components.
+- **Fail-open by default** — a missing, unmet, or errored Learning Contract, or an
+  absent host, never blocks the developer or the agent (ADR-0004).
+- Learning Contracts are optional and opt-in.
+- Analytics measures outcomes, not behavior. Read-only.
 
-------------------------------------------------------------------------
+---
 
-## 3. Core Concepts
+## 3. v1 Scope
 
--   Card
--   Deck
--   Review
--   Review Event
--   Learning Contract
--   Session
--   Trigger
--   Renderer
+v1 is the smallest slice that tests the core hypothesis — *will developers review
+during AI waits?* — with cards entered by hand.
 
-------------------------------------------------------------------------
+**In v1:**
+
+- Runtime Engine
+- Learning Engine (FSRS scheduling, card selection, Review flow)
+- One Trigger Adapter: **Claude Code** (a hook client)
+- Terminal Renderer (draws into whatever pane the user provides)
+- Storage (SQLite)
+- Manual card entry
+
+**Deferred (post-v1):**
+
+- Contract Engine (Learning Contracts, Prompt Gate)
+- Analytics Engine
+- Import / Export (Anki TSV, CSV, JSON)
+- Additional Trigger Adapters (Codex, OpenCode)
+- Auto-spawning tmux / Zellij pane integration and a Desktop Renderer
+
+---
 
 ## 4. High-level Architecture
 
+LearnWhile runs as a **single long-lived process** (the host) that the user places
+in its own pane or second terminal. Trigger Adapters are thin, agent-specific
+clients that forward Triggers to it over a unix socket (ADR-0003, ADR-0004).
+
 ``` text
-LearnWhile
-├── Runtime Engine
-├── Learning Engine
-├── Contract Engine
-├── Analytics Engine
-├── Trigger Adapter
-├── Renderer
-├── Storage
-└── Import / Export
+pane A: Claude Code ──hook (Trigger Adapter)──▶ unix socket
+                                                   │
+pane B: LearnWhile host (long-lived) ◀────────────┘
+        ├── Runtime Engine        (open-Trigger set, event routing)
+        ├── Learning Engine        (FSRS, card selection, Review flow)
+        ├── Renderer               (passive card pane)
+        └── Storage                (SQLite — sole owner)
+
+Deferred: Contract Engine · Analytics Engine · Import/Export
 ```
 
-------------------------------------------------------------------------
+The user arranges the split (tmux / Zellij / a second terminal); the multiplexer is
+the user's environment, not a v1 component (ADR-0003).
+
+---
 
 ## 5. Runtime Engine
 
 **Purpose**
 
-Coordinates the entire application lifecycle. It connects triggers,
-learning, rendering, storage, and contracts without containing learning
-logic.
+Coordinates the application lifecycle and routes events between adapters, learning,
+rendering, and storage, without containing learning logic.
 
 **Responsibilities**
 
--   Session lifecycle
--   Event routing
--   Trigger coordination
--   Renderer coordination
+- Own the **open-Trigger set**: the developer is **Waiting** exactly while the set is
+  non-empty (ADR-0005). A card is surfaced while Waiting and cleared when the set
+  empties — even across multiple concurrent agents.
+- Accept Trigger open/close events from adapters over the unix socket.
+- Session lifecycle (see §11).
+- Renderer coordination.
+- Tolerate a lost close (agent or host crash) so the set does not leak a phantom
+  open — via a per-Trigger timeout and/or a session-end sweep (open gap, §13).
 
-------------------------------------------------------------------------
+---
 
 ## 6. Learning Engine
 
 **Purpose**
 
-Owns the learning domain, including spaced repetition, card management,
-and review scheduling.
+Owns the learning domain: spaced repetition, card management, and Review scheduling.
 
 **Responsibilities**
 
--   Cards
--   Decks
--   FSRS
--   Review flow
--   Due card selection
+- Cards and (post-v1) Decks.
+- FSRS scheduling.
+- Card selection on each Trigger, in strict order (ADR-0002):
+  1. a genuinely **due** card; else
+  2. introduce a **new** card, up to a daily new-card cap; else
+  3. signal the idle/stats state.
+  It never pulls a not-yet-due card forward, keeping FSRS intervals honest.
+- Review flow. A **Review** is complete once the question is shown, the answer
+  revealed, a rating is selected (Again / Hard / Good / Easy), and the result is
+  persisted. Correctness is **not** required.
 
-------------------------------------------------------------------------
+---
 
-## 7. Contract Engine
+## 7. Trigger Adapter — Claude Code (v1)
 
 **Purpose**
 
-Evaluates optional learning commitments and determines whether learning
-goals have been satisfied before allowing specific actions.
+Translate one agent's raw events into Triggers and forward them to the host.
 
-**Responsibilities**
+**Behavior**
 
--   Prompt Contract
--   Time Contract
--   Session Contract
--   Daily Contract
+- A Trigger **opens** on `UserPromptSubmit` (covering the agent's thinking and tool
+  time) and **closes** on the first of `Stop`, `PermissionRequest`, or `Elicitation`
+  — i.e. the moment the agent needs the developer back (ADR-0001).
+- The adapter is a hook command: it connects to the host's unix socket, sends the
+  event fire-and-forget with a tight timeout, and swallows all errors (always exits
+  0). A down or absent host is a silent no-op — **fail-open** (ADR-0004).
+- The adapter holds no learning state.
 
-Prompt Gate is a Prompt Contract.
+---
 
-A review is complete when:
-
-1.  Question shown
-2.  Answer revealed
-3.  Rating selected (Again / Hard / Good / Easy)
-4.  Review persisted
-
-Correctness is not required.
-
-------------------------------------------------------------------------
-
-## 8. Analytics Engine
+## 8. Renderer (v1: Terminal)
 
 **Purpose**
 
-Transforms application events into meaningful metrics that help users
-understand their learning effectiveness and AI usage.
+Present the card without containing business logic.
 
-**Responsibilities**
+**Behavior**
 
--   Learning metrics
--   AI waiting utilization
--   Contract completion
--   Dashboard metrics
+- Draws a **passive** card into its own pane; it never steals foreground focus, so the
+  developer cannot miss a permission prompt or the agent completing (ADR-0001).
+- Shows the current card while Waiting; shows a neutral idle/stats state otherwise.
 
-Read-only.
+Deeper integrations (auto-spawning tmux / Zellij panes, a Desktop Renderer) are
+deferred.
 
-------------------------------------------------------------------------
+---
 
 ## 9. Storage
 
 **Purpose**
 
-Persists all application data and provides a single source of truth.
+Persist all data and provide a single source of truth. The host is the **sole owner**
+of the SQLite file (ADR-0003); only one host may run at a time.
 
 SQLite tables:
 
--   cards
--   review_history
--   decks
--   config
+- cards
+- review_history
+- decks
+- config
 
-------------------------------------------------------------------------
+---
 
-## 10. Trigger Adapter
+## 10. Session
 
-**Purpose**
+One rolling, ambient **Session** tied to a Trigger Adapter being connected (roughly a
+work sitting), not to any single wait. Triggers surface cards into the current
+Session; a card left unfinished when the agent returns stays in-flight until finished
+or abandoned. A Session spans many Waiting/idle cycles of the open-Trigger set.
 
-Converts external tools and AI agents into standardized runtime events.
+---
 
-Examples:
+## 11. Deferred Engines (post-v1)
 
--   Claude Code
--   Codex
--   OpenCode
+**Contract Engine.** Evaluates optional **Learning Contracts** (Prompt / Time /
+Session / Daily). A **Prompt Gate** is a Learning Contract that requires a completed
+Review before the agent's next prompt proceeds — the one case where LearnWhile blocks,
+and only when opted in. The bidirectional unix socket already anticipates carrying a
+Review result back to the adapter for this (ADR-0004).
 
-------------------------------------------------------------------------
+**Analytics Engine.** Transforms events into learning metrics, AI-waiting
+utilization, and Contract completion. Read-only.
 
-## 11. Renderer
+**Import / Export.** Converts LearnWhile data to and from Anki TSV, CSV, and JSON,
+keeping the Learning Engine independent of external formats.
 
-**Purpose**
+---
 
-Presents the user interface without containing business logic.
+## 12. Future Roadmap
 
-Supported implementations:
+- Insights Engine
+- AI-generated cards
+- Obsidian / Notion integration
+- Cloud Sync
+- Team Learning
 
--   Terminal
--   tmux
--   Zellij
--   Desktop (future)
+---
 
-------------------------------------------------------------------------
+## 13. Known Gaps
 
-## 12. Import / Export
+Resolved architecture aside, these v1 details are still open (do not block the spine):
 
-**Purpose**
-
-Converts LearnWhile data to and from external formats while keeping the
-Learning Engine independent.
-
-Supported formats:
-
--   Anki TSV
--   CSV
--   JSON
-
-------------------------------------------------------------------------
-
-## 13. Future Roadmap
-
--   Insights Engine
--   AI-generated cards
--   Obsidian
--   Notion
--   Cloud Sync
--   Team Learning
+- **Crash recovery** — concrete lost-close policy: per-Trigger timeout value and/or a
+  session-end sweep to drain the open-Trigger set (ADR-0005).
+- **Manual card-add UX** — CLI command vs in-TUI form; and whether v1 exposes Decks or
+  a single default deck.
+- **Idle-pane content** — what the Renderer shows when nothing is due.
+- **Card / FSRS data model** — per-card FSRS state fields and the `review_history`
+  shape.
