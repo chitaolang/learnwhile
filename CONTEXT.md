@@ -37,6 +37,14 @@ is selected, and the result is persisted. Correctness is explicitly _not_ requir
 Review to count.
 _Avoid_: attempt, quiz, test
 
+**Lapse**:
+A Review rated Again. The card is rescheduled by FSRS like any other Review, and additionally
+returns to the lapse queue — a Session-scoped, in-memory list of cards to re-attempt on a later
+Trigger in that same Session. A card leaves the queue on any rating other than Again, and the
+queue itself does not survive the Session (ADR-0010). A Lapse is a completed Review, not a
+failed one; correctness is not what a Review measures.
+_Avoid_: fail, miss, relearn, forget
+
 **Learning Contract**:
 An optional commitment that lets a Review outcome gate a chosen action. Always opt-in;
 when absent or failed, nothing is blocked.

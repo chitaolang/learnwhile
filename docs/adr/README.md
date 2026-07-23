@@ -20,6 +20,7 @@ Vocabulary follows the glossary in [`/CONTEXT.md`](../../CONTEXT.md).
 | [0007](./0007-ndjson-trigger-frames.md) | Adapters send newline-delimited JSON frames identified by adapter and session |
 | [0008](./0008-single-binary-subcommands.md) | One binary is both the long-lived host and the hook client |
 | [0009](./0009-single-event-loop-producer-threads.md) | The host is one event loop fed by producer threads; no async runtime |
+| [0010](./0010-lapsed-cards-requeue-within-session.md) | A lapsed card returns within the same Session; the ban on pulling forward holds across them |
 
 ## How they relate
 
@@ -34,6 +35,12 @@ record alone can overstate what was settled at the time:
   adapter a subcommand of the host binary.
 - **0004**, **0006** and the Review flow each introduce an input the host must handle, without
   saying how they coexist → **0009** serialises all three onto one event loop.
+
+One record narrows an earlier one:
+
+- **0010** carves a Session-bounded exception into **0002**'s ban on surfacing a not-yet-due
+  card. Read 0002 alone and the ban looks absolute; it is absolute across Sessions and days,
+  which is the part that protects the scheduler.
 
 ## Adding a record
 
