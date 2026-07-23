@@ -254,8 +254,19 @@ gap from §13:
   reconstruct scheduler state.
 - `decks` — id, name. v1 creates and uses a single default deck; decks exist in the schema so
   post-v1 doesn't need a migration.
-- `config` — key/value. Holds the daily new-card cap, the Trigger expiry
-  (`trigger_expiry_seconds`), and FSRS desired retention.
+- `config` — key/value, seeded with these defaults on first migration:
+
+  | Key | Default | Rationale |
+  |---|---|---|
+  | `trigger_expiry_seconds` | `1800` | ADR-0006, which argues for erring short |
+  | `desired_retention` | `0.9` | the FSRS convention, and the retention the stability definition itself is anchored to |
+  | `new_cards_per_day` | `20` | a chosen default, not a derived one — see below |
+
+  `new_cards_per_day` has no principled value available yet. 20 is Anki's default and a
+  reasonable starting point, but the right number depends on how many Triggers a developer
+  actually gets in a day, which is exactly what v1 exists to find out. Treat it as a guess to
+  revisit once `review_history` has real data in it. All three are user-editable rows rather
+  than constants precisely so that revisiting them costs nothing.
 
 Migrations run on host startup.
 
@@ -276,8 +287,8 @@ flag, so the post-v1 optimization pass needs no dependency change.
 
 The consequential finding is what it *doesn't* model: long-term memory only, day-granularity
 intervals, no learning steps and no sub-day scheduling. That is what forced ADR-0010, and it
-means `desired_retention` is a v1 input we must choose — it goes in `config` alongside the
-daily cap and the Trigger expiry rather than being hardcoded.
+means `desired_retention` is a v1 input we must choose — it goes in `config` at `0.9` (see
+**Schema**) alongside the daily cap and the Trigger expiry rather than being hardcoded.
 
 **Renderer.** `ratatui`. Draws the current card or the idle state. This spec resolves the
 idle-pane-content gap from §13: the idle state shows due-today and new-remaining counts plus
