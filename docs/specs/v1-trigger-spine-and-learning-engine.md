@@ -392,7 +392,9 @@ ADR-0005's explicitly-flagged lost-close tolerance.
 **Sequencing.** The spine should land before the Learning Engine: Trigger → socket → set →
 Renderer with a hardcoded card proves the riskiest, least-reversible part (does the hook fire
 when we think, does fail-open hold) while it's still cheap to change. FSRS and storage are
-conventional work that can follow with confidence.
+conventional work that can follow with confidence. This argument is worked out into five
+vertical slices in [`docs/milestones/`](../milestones/README.md), each shipping UI and backend
+together so every one of them can be dogfooded.
 
 **The hypothesis under test.** DESIGN_DRAFT §3 frames v1 as testing *will developers review
 during AI waits?* Worth noting this build can't fully answer that — `review_history` holds
