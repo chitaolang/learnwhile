@@ -1,0 +1,23 @@
+[package]
+name = "learnwhile"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["serde"] }
+crossterm = "0.29.0"
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = { version = "3.27.0", optional = true }
+
+[features]
+# The `spawn_test_host` harness. Off by default so the shipped binary carries no test scaffolding;
+# enabled for integration tests via the self dev-dependency below.
+testing = ["dep:tempfile"]
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+learnwhile = { path = ".", features = ["testing"] }
+tempfile = "3.27.0"
