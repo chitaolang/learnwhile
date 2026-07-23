@@ -85,44 +85,49 @@ Renderer, and SQLite storage. Manual card entry is excluded; cards are seeded fr
     day of heavy agent use doesn't dump an entire deck on me at once.
 17. As a developer, I want LearnWhile to never show me a card ahead of its due date, so that
     my FSRS intervals stay accurate and the spacing benefit isn't blunted.
-18. As a developer with a small deck, I want the idle state on some waits to be normal and
+18. As a developer who just rated a card Again, I want that card offered again on a later wait
+    in the same sitting, so that failing a card actually costs me a second attempt rather than
+    looking identical to passing it.
+19. As a developer, I want a card I re-attempted and got right to stop coming back for the
+    rest of the sitting, so that re-attempts converge instead of looping.
+20. As a developer with a small deck, I want the idle state on some waits to be normal and
     unalarming, so that I understand it as correct behavior rather than a bug.
-19. As a developer, I want my scheduling data to be FSRS-shaped, so that the work I put into
+21. As a developer, I want my scheduling data to be FSRS-shaped, so that the work I put into
     this deck isn't trapped here when import/export arrives later.
 
 **Running the host**
 
-20. As a developer, I want to start LearnWhile with a single command in a pane I chose, so
+22. As a developer, I want to start LearnWhile with a single command in a pane I chose, so
     that I control my own terminal layout rather than having a tool rearrange it.
-21. As a developer, I want LearnWhile to keep running across many prompts and many waits, so
+23. As a developer, I want LearnWhile to keep running across many prompts and many waits, so
     that I start it once per sitting and forget about it.
-22. As a developer, I want to quit LearnWhile cleanly with a keypress, so that my terminal is
+24. As a developer, I want to quit LearnWhile cleanly with a keypress, so that my terminal is
     left in a sane state.
-23. As a developer who restarts the host after a crash, I want it to start cleanly despite a
+25. As a developer who restarts the host after a crash, I want it to start cleanly despite a
     stale socket file, so that a previous bad exit doesn't require manual cleanup.
-24. As a developer, I want to be told clearly if a second host can't start because one is
+26. As a developer, I want to be told clearly if a second host can't start because one is
     already running, so that I'm not confused by two panes disagreeing.
 
 **Fail-open**
 
-25. As a developer who hasn't started LearnWhile, I want my coding agent to behave exactly as
+27. As a developer who hasn't started LearnWhile, I want my coding agent to behave exactly as
     it always has, so that installing the hook costs me nothing on days I don't review.
-26. As a developer whose LearnWhile process has crashed, I want my agent to keep working
+28. As a developer whose LearnWhile process has crashed, I want my agent to keep working
     normally, so that a learning tool can never take down my actual work.
-27. As a developer, I want the hook to add no perceptible latency to submitting a prompt, so
+29. As a developer, I want the hook to add no perceptible latency to submitting a prompt, so
     that I never feel a tax for having LearnWhile installed.
-28. As a developer whose host is wedged but alive, I want the hook to give up almost
+30. As a developer whose host is wedged but alive, I want the hook to give up almost
     instantly, so that a hung host can't stall my agent.
-29. As a developer, I want a lost Trigger close (from an agent or host crash) to eventually
+31. As a developer, I want a lost Trigger close (from an agent or host crash) to eventually
     clear, so that a phantom open doesn't pin a card up forever.
 
 **Getting cards in**
 
-30. As a developer trying LearnWhile, I want to seed a deck from a simple file, so that I can
+32. As a developer trying LearnWhile, I want to seed a deck from a simple file, so that I can
     evaluate the tool without hand-entering cards through a UI that doesn't exist yet.
-31. As a developer, I want re-running the seed to not duplicate cards I already have, so that
+33. As a developer, I want re-running the seed to not duplicate cards I already have, so that
     I can iterate on my seed file safely.
-32. As a developer, I want my cards and review history to survive restarts, so that the deck
+34. As a developer, I want my cards and review history to survive restarts, so that the deck
     accumulates real scheduling state over days.
 
 ## Implementation Decisions
@@ -131,6 +136,26 @@ Renderer, and SQLite storage. Manual card entry is excluded; cards are seeded fr
 hook client (selected by subcommand), so the hook inherits a few-millisecond startup — a
 requirement, not a preference, given it fires on every prompt submission (ADR-0004). The
 repo currently has no `Cargo.toml` or `src/`; this spec includes standing up the crate.
+
+**Crate selections.** Settled with the developer; each is the smallest thing that satisfies a
+constraint recorded elsewhere, not a preference:
+
+| Concern | Crate | Why this one |
+|---|---|---|
+| Scheduling | `fsrs` 6.6.1 | see **FSRS** below |
+| Storage | `rusqlite`, `bundled` feature | synchronous, no runtime, no dependency on the user having `libsqlite3` |
+| Terminal | `ratatui` + `crossterm` | `TestBackend` is an observation surface the testing decisions depend on |
+| Frames | `serde` + `serde_json` | ADR-0007's format; also used on the hook path, so it must stay cheap |
+| Time | `chrono` | RFC3339 for the frame `at` field; `Local` for resolving "today" for the daily cap |
+| Logging | `tracing` + `tracing-subscriber` | ADR-0007 requires a log file so discarded frames are diagnosable |
+| Errors | `anyhow` | host only — see below |
+| Tests | `tempfile`, `assert_cmd` | temp DB and socket paths; the fail-open subprocess tests |
+
+Deliberately absent: **no async runtime** (ADR-0009), **no ORM or query builder**, and **no
+migration crate** — v1 has one migration and runs it against `PRAGMA user_version`. `anyhow`
+is for the host; the `hook` path uses no error type at all, since it discards every failure and
+exits 0 regardless (ADR-0004). Neither `anyhow` nor `tracing` may be initialised on the hook
+path, per ADR-0008's standing discipline.
 
 **Process topology.** One long-lived host owning the Runtime Engine, Learning Engine,
 Renderer, and Storage, per ADR-0003. The user places it in a pane themselves; no multiplexer
@@ -148,6 +173,14 @@ integration. The host is sole binder of the unix socket and sole owner of the SQ
 The Learning module must be constructible with an injected clock and an injected storage
 handle. This is required for testability through the single seam (see Testing Decisions) and
 is a hard constraint on its interface, not a suggestion.
+
+**Event loop.** Per ADR-0009, the host is a single event loop owning all state, fed by three
+producer threads over one `std::sync::mpsc` channel: a socket accept thread, a terminal input
+thread, and a sweep tick thread driving Trigger expiry (ADR-0006). Producer threads translate
+and send; they hold no state and make no decisions. This is what makes the two input channels
+of the Testing Decisions reachable — a test holds a `Sender` clone and injects key events
+without a terminal — and it is why no host state needs a lock. A malformed frame must fail the
+connection, not the accept thread (ADR-0007).
 
 **Socket protocol.** Newline-delimited JSON over a unix domain socket at
 `$XDG_RUNTIME_DIR/learnwhile.sock`, falling back to a documented path when that variable is
@@ -180,10 +213,18 @@ JSON from stdin to obtain the session id, connects with a tight timeout, writes 
 and exits 0 unconditionally — including on connect failure, timeout, malformed input, or
 panic. It holds no learning state and never writes to storage.
 
-**Card selection.** Strict order per ADR-0002, evaluated fresh on each surfacing: a genuinely
-due card; else a new card if today's introductions are under the daily cap; else the idle
-state. Never pulls a not-yet-due card forward. "Today" is resolved against the injected clock
-in the user's local timezone.
+**Card selection.** Strict order per ADR-0002 as narrowed by ADR-0010, evaluated fresh on each
+surfacing: a card in the Session's lapse queue; else a genuinely due card; else a new card if
+today's introductions are under the daily cap; else the idle state. Never pulls a not-yet-due
+card forward *across* Sessions — the lapse queue is the one bounded exception, and it lives
+only in memory. "Today" is resolved against the injected clock in the user's local timezone.
+
+**Lapse queue.** Session state, in memory, never persisted (ADR-0010). A card rated Again is
+appended; a card rated anything else is removed. It is discarded when the Session ends or the
+host exits, after which affected cards revert to their persisted due dates. A re-attempt is an
+ordinary Review: `next_states` is called with `days_elapsed` of zero and the result persisted
+like any other, so a `review_history` row with zero elapsed days is what identifies an
+intra-Session repeat.
 
 **Review flow.** A state machine, not ad-hoc flags — it must survive being interrupted
 mid-Review when the agent returns and resumed on a later Trigger within the same Session:
@@ -194,27 +235,49 @@ Idle ──surface──▶ Question ──reveal──▶ Answer ──rate(Aga
 
 A Review is complete only once persisted. Correctness is explicitly not required (CONTEXT.md).
 The in-flight card is Session state: clearing the pane when the set empties must not discard
-it. Ratings arrive as keypresses; reveal is a single key.
+it. Ratings arrive as keypresses; reveal is a single key. A rating of Again persists exactly
+like the other three and additionally enqueues the card as a Lapse — the state machine returns
+to Idle either way, so the lapse queue is a selection-order concern and not a fifth state.
 
 **Schema.** SQLite, tables per DESIGN_DRAFT §9. This spec resolves the card/FSRS data-model
 gap from §13:
 
 - `cards` — id, deck_id, front, back, FSRS state (`stability`, `difficulty`, `state`,
   `due`, `reps`, `lapses`, `last_reviewed_at`), `created_at`, and a content hash for
-  seed idempotency.
+  seed idempotency. `state` has a domain of `new` and `review` in v1 — it is derivable from
+  `last_reviewed_at` today and exists explicitly so post-v1 relearning states need no
+  migration, the same reasoning that keeps `decks` in the schema. Being in the lapse queue is
+  *not* a value of `state`; it is Session state, not card state (ADR-0010).
 - `review_history` — id, card_id, session_id, `reviewed_at`, `rating`, and the FSRS
   stability/difficulty before and after, plus elapsed and scheduled days. Append-only; it is
   the audit trail the deferred Analytics Engine will read, so it records enough to
   reconstruct scheduler state.
 - `decks` — id, name. v1 creates and uses a single default deck; decks exist in the schema so
   post-v1 doesn't need a migration.
-- `config` — key/value. Holds the daily new-card cap and the Trigger expiry.
+- `config` — key/value. Holds the daily new-card cap, the Trigger expiry
+  (`trigger_expiry_seconds`), and FSRS desired retention.
 
 Migrations run on host startup.
 
-**FSRS.** Use an existing FSRS implementation rather than hand-rolling one; the `fsrs-rs`
-crate is the obvious candidate but its API surface should be confirmed before committing.
-Default parameters are fine for v1 — no optimization pass.
+**FSRS.** The `fsrs` crate, version 6.6.1 — API surface confirmed rather than assumed. Two
+findings mattered. It no longer drags in the `burn` ML framework, which had been the standing
+objection to it; the tree is ~70 crates, heaviest `ndarray` and `rayon`, which is unremarkable
+for a local tool. And its inference surface is exactly what v1 needs and no more:
+
+```rust
+fsrs.next_states(current: Option<MemoryState>, desired_retention: f32, days_elapsed: u32)
+    -> Result<NextStates>   // { again, hard, good, easy }, each
+                            // ItemState { memory: MemoryState { stability, difficulty }, interval: f32 }
+```
+
+`DEFAULT_PARAMETERS` is exported, so "defaults only, no optimization pass" is a construction
+argument. Parameter fitting (`compute_parameters`) lives in the same crate behind no feature
+flag, so the post-v1 optimization pass needs no dependency change.
+
+The consequential finding is what it *doesn't* model: long-term memory only, day-granularity
+intervals, no learning steps and no sub-day scheduling. That is what forced ADR-0010, and it
+means `desired_retention` is a v1 input we must choose — it goes in `config` alongside the
+daily cap and the Trigger expiry rather than being hardcoded.
 
 **Renderer.** `ratatui`. Draws the current card or the idle state. This spec resolves the
 idle-pane-content gap from §13: the idle state shows due-today and new-remaining counts plus
@@ -247,19 +310,26 @@ the daily cap's rollover.
 
 **Two input channels at that seam.** The socket carries Triggers; keypresses carry reveal and
 rating. Both are inputs to the same host boundary, so the event loop needs a test-reachable
-way to inject key events — this is a design constraint on the loop, and should be settled
-early rather than retrofitted.
+way to inject key events. ADR-0009 settles how: every input reaches the loop as an `Event` on
+one channel, so a test holds a `Sender` clone and sends key events directly, with no terminal
+and no fake `crossterm`. Trigger frames still go over the real socket — the point of the seam
+is that the protocol is exercised, not mocked.
 
 **Two observation surfaces.** `ratatui`'s `TestBackend` renders to an in-memory cell buffer,
 which tests assert against for what the developer sees. Direct SQLite reads confirm what
-persisted. Both are external to the modules under test.
+persisted. Both are external to the modules under test. Assert on the *content* of the buffer
+— the card's text, the idle counts — not on a full snapshot of it. A snapshot test fails on
+every layout change, which is the "breaks when internals restructure, developer experience
+unchanged" failure mode this section already rejects.
 
 **What is tested.** Trigger open surfaces a card and close clears it; two overlapping Triggers
 keep the card up until both close; a lost close expires and drains; an in-flight card survives
 the agent returning and resumes on the next Trigger; the full reveal-and-rate flow writes a
-`review_history` row and advances the card's due date; selection follows due → new → idle
-strictly; a not-yet-due card is never surfaced; the daily cap holds and rolls over; the idle
-state shows correct counts; seeding is idempotent.
+`review_history` row and advances the card's due date; selection follows lapse → due → new →
+idle strictly; a card rated Again returns on a later Trigger in the same Session and stops
+returning once rated Good; the lapse queue does not survive a host restart; a not-yet-due card
+is never surfaced across Sessions; the daily cap holds and rolls over; the idle state shows
+correct counts; seeding is idempotent.
 
 **Fail-open is tested at the adapter separately.** The hook is invoked as a subprocess with no
 host running, a refused socket, and a deliberately wedged socket; in every case it must exit 0
@@ -294,14 +364,19 @@ what it returns.
 
 ## Further Notes
 
-**Three decisions were promoted to ADRs.** The Trigger expiry policy (ADR-0006), the
+**Five decisions were promoted to ADRs.** The Trigger expiry policy (ADR-0006), the
 newline-delimited JSON frame format (ADR-0007), and the single-binary-with-subcommands topology
-(ADR-0008) began life in this spec and now live in `docs/adr/`, which is the durable record.
-Where this spec and those ADRs disagree, the ADRs win.
+(ADR-0008) began life in this spec. The event-loop shape (ADR-0009) and the lapse queue
+(ADR-0010) were added when the stack was settled. All five live in `docs/adr/`, which is the
+durable record. Where this spec and those ADRs disagree, the ADRs win.
 
-**Nothing here contradicts an existing ADR.** The spec commits ADR-0004's deferred "concrete
-IPC transport and message format," and resolves ADR-0005's explicitly-flagged lost-close
-tolerance — both are gaps those ADRs left open by design, not reversals.
+**One narrowing of an existing ADR.** ADR-0010 carves a Session-bounded exception into
+ADR-0002's ban on surfacing a not-yet-due card. This was forced by confirming the scheduler's
+API rather than assuming it: `fsrs` has no learning steps, so under ADR-0002 read literally a
+failed card would be unreachable for days. The ban still holds absolutely across Sessions,
+which is the part that protects the scheduler. Everything else here fills gaps those ADRs left
+open by design: ADR-0004's deferred "concrete IPC transport and message format," and
+ADR-0005's explicitly-flagged lost-close tolerance.
 
 **Sequencing.** The spine should land before the Learning Engine: Trigger → socket → set →
 Renderer with a hardcoded card proves the riskiest, least-reversible part (does the hook fire

@@ -105,14 +105,18 @@ Owns the learning domain: spaced repetition, card management, and Review schedul
 
 - Cards and (post-v1) Decks.
 - FSRS scheduling.
-- Card selection on each Trigger, in strict order (ADR-0002):
-  1. a genuinely **due** card; else
-  2. introduce a **new** card, up to a daily new-card cap; else
-  3. signal the idle/stats state.
-  It never pulls a not-yet-due card forward, keeping FSRS intervals honest.
+- Card selection on each Trigger, in strict order (ADR-0002, ADR-0010):
+  1. a card in the Session's **lapse queue**; else
+  2. a genuinely **due** card; else
+  3. introduce a **new** card, up to a daily new-card cap; else
+  4. signal the idle/stats state.
+  It never pulls a not-yet-due card forward across Sessions, keeping FSRS intervals
+  honest. The lapse queue is the one exception and is bounded by the Session.
 - Review flow. A **Review** is complete once the question is shown, the answer
   revealed, a rating is selected (Again / Hard / Good / Easy), and the result is
-  persisted. Correctness is **not** required.
+  persisted. Correctness is **not** required. A **Lapse** — a Review rated Again —
+  is persisted like any other and additionally re-queues the card for a later
+  Trigger in the same Session (ADR-0010).
 
 ---
 
@@ -204,12 +208,16 @@ keeping the Learning Engine independent of external formats.
 
 ## 13. Known Gaps
 
-Resolved architecture aside, these v1 details are still open (do not block the spine):
+Most of these have since closed. What remains open:
 
-- **Crash recovery** — concrete lost-close policy: per-Trigger timeout value and/or a
-  session-end sweep to drain the open-Trigger set (ADR-0005).
-- **Manual card-add UX** — CLI command vs in-TUI form; and whether v1 exposes Decks or
-  a single default deck.
-- **Idle-pane content** — what the Renderer shows when nothing is due.
-- **Card / FSRS data model** — per-card FSRS state fields and the `review_history`
-  shape.
+- **Manual card-add UX** — CLI command vs in-TUI form. Out of scope for v1, which seeds
+  cards from a file and uses a single default deck; Decks exist in the schema but not
+  in the UI.
+
+Closed since this draft:
+
+- **Crash recovery** — ADR-0006 sets a per-Trigger expiry drained by a periodic sweep.
+- **Idle-pane content** — the v1 spec settles it: due-today and new-remaining counts
+  plus the next due time.
+- **Card / FSRS data model** — the v1 spec settles the `cards` and `review_history`
+  shapes against the confirmed `fsrs` API.
