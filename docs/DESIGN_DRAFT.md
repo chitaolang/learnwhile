@@ -31,7 +31,7 @@ The project is **Anki-compatible, not Anki-dependent**.
 ## 3. v1 Scope
 
 v1 is the smallest slice that tests the core hypothesis — *will developers review
-during AI waits?* — with cards entered by hand.
+during AI waits?* — against a deck seeded from a file.
 
 **In v1:**
 
@@ -40,15 +40,20 @@ during AI waits?* — with cards entered by hand.
 - One Trigger Adapter: **Claude Code** (a hook client)
 - Terminal Renderer (draws into whatever pane the user provides)
 - Storage (SQLite)
-- Manual card entry
+- Deck seeding from a file (a `seed` subcommand)
 
 **Deferred (post-v1):**
 
+- Manual card entry (CLI command or in-TUI form)
 - Contract Engine (Learning Contracts, Prompt Gate)
 - Analytics Engine
 - Import / Export (Anki TSV, CSV, JSON)
 - Additional Trigger Adapters (Codex, OpenCode)
 - Auto-spawning tmux / Zellij pane integration and a Desktop Renderer
+
+Seeding is a developer affordance to make v1 usable without a card-add UI. It is
+deliberately **not** the deferred Import / Export feature and should not accrete
+format support.
 
 ---
 
