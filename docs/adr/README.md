@@ -19,6 +19,7 @@ Vocabulary follows the glossary in [`/CONTEXT.md`](../../CONTEXT.md).
 | [0006](./0006-trigger-expiry-drains-phantom-opens.md) | Open Triggers expire, so a lost close cannot pin the card up forever |
 | [0007](./0007-ndjson-trigger-frames.md) | Adapters send newline-delimited JSON frames identified by adapter and session |
 | [0008](./0008-single-binary-subcommands.md) | One binary is both the long-lived host and the hook client |
+| [0009](./0009-single-event-loop-producer-threads.md) | The host is one event loop fed by producer threads; no async runtime |
 
 ## How they relate
 
@@ -31,6 +32,8 @@ record alone can overstate what was settled at the time:
   sets the expiry policy.
 - **0003** establishes thin adapters without saying how one ships → **0008** makes the
   adapter a subcommand of the host binary.
+- **0004**, **0006** and the Review flow each introduce an input the host must handle, without
+  saying how they coexist → **0009** serialises all three onto one event loop.
 
 ## Adding a record
 
