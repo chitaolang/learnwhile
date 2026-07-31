@@ -289,6 +289,32 @@ impl Storage {
         Ok(card)
     }
 
+    /// How many new cards were introduced in the half-open window `[start, end)`, derived from
+    /// `review_history` rather than a counter so a restart cannot lose or double the count
+    /// (milestone sub-task 4). A new-card introduction is a card's *first* Review, which is exactly
+    /// the row whose `stability_before` is null (no prior memory state). The window is passed as
+    /// bound parameters so the caller decides what "today" means (ADR-0002, local timezone).
+    pub fn introductions_between(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<i64> {
+        let count = self.conn.query_row(
+            "SELECT COUNT(*) FROM review_history
+             WHERE stability_before IS NULL AND reviewed_at >= ?1 AND reviewed_at < ?2",
+            [start.to_rfc3339(), end.to_rfc3339()],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// How many cards have never been reviewed (`state = 'new'`), for the idle pane's
+    /// new-remaining count.
+    pub fn new_card_count(&self) -> Result<i64> {
+        let count = self.conn.query_row(
+            "SELECT COUNT(*) FROM cards WHERE state = 'new'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     /// Persist one completed Review: update the card's FSRS state and due date, and append the
     /// append-only `review_history` row, in a single transaction (spec §Review flow, §Schema). Both
     /// land or neither does, so a crash cannot leave the card advanced without its audit row, nor
@@ -492,6 +518,97 @@ mod tests {
             new_reps: 1,
             new_lapses: 0,
         }
+    }
+
+    /// A `ReviewRecord` at a chosen instant. `first` controls whether it looks like a first Review
+    /// (null `*_before`, which is what an introduction is) or a repeat.
+    fn review_at(card_id: i64, reviewed_at: DateTime<Utc>, first: bool) -> ReviewRecord {
+        ReviewRecord {
+            card_id,
+            session_id: "test".into(),
+            reviewed_at,
+            rating: 3,
+            stability_before: if first { None } else { Some(4.0) },
+            difficulty_before: if first { None } else { Some(5.0) },
+            stability_after: 5.0,
+            difficulty_after: 5.0,
+            elapsed_days: 0,
+            scheduled_days: 3.0,
+            new_due: reviewed_at + Duration::days(3),
+            new_reps: 1,
+            new_lapses: 0,
+        }
+    }
+
+    #[test]
+    fn introductions_between_counts_only_first_reviews_inside_the_window() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+        storage
+            .seed_cards(
+                &[
+                    NewCard {
+                        front: "a".into(),
+                        back: "1".into(),
+                    },
+                    NewCard {
+                        front: "b".into(),
+                        back: "2".into(),
+                    },
+                    NewCard {
+                        front: "c".into(),
+                        back: "3".into(),
+                    },
+                ],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        let t = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        let start = t - Duration::hours(1);
+        let end = t + Duration::hours(1);
+
+        // Counts: a first Review inside the window.
+        storage.record_review(&review_at(1, t, true)).expect("r1");
+        // Excluded: a first Review outside the window.
+        storage
+            .record_review(&review_at(2, t + Duration::hours(2), true))
+            .expect("r2");
+        // Excluded: a repeat Review inside the window is not an introduction.
+        storage.record_review(&review_at(3, t, false)).expect("r3");
+
+        assert_eq!(storage.introductions_between(start, end).unwrap(), 1);
+    }
+
+    #[test]
+    fn new_card_count_drops_as_cards_are_reviewed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+        storage
+            .seed_cards(
+                &[
+                    NewCard {
+                        front: "a".into(),
+                        back: "1".into(),
+                    },
+                    NewCard {
+                        front: "b".into(),
+                        back: "2".into(),
+                    },
+                ],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        assert_eq!(storage.new_card_count().unwrap(), 2);
+
+        let t = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        storage
+            .record_review(&review_at(1, t, true))
+            .expect("review");
+
+        // Card 1 is now 'review', so only one new card remains.
+        assert_eq!(storage.new_card_count().unwrap(), 1);
     }
 
     #[test]
