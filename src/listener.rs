@@ -15,19 +15,26 @@ use crate::frame::{DiscardReason, MAX_LINE_BYTES, parse_line};
 /// that connects and then says nothing, which would otherwise hold a connection thread forever.
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// Bind the socket, clearing a stale file first.
+/// Bind the socket, recovering a stale file and refusing a live one.
 ///
 /// A socket file with a *live* listener is never unlinked: we probe it with a connect, and a
-/// successful connect means another host owns it (ADR-0003). M5 turns this into a proper
-/// single-instance message; here it is the minimum needed not to stomp a running host.
+/// successful connect means another host owns it (ADR-0003), so we refuse with a clear message. A
+/// file with no listener is stale (a killed host left it) and is unlinked before rebinding. These
+/// are the same code path from opposite directions.
 pub fn bind(socket_path: &Path) -> Result<UnixListener> {
     if socket_path.exists() {
+        // A successful connect means a live host owns the socket (ADR-0003). Refuse with a message
+        // that says what is running and what to do, rather than a raw bind error. The connect is a
+        // courtesy for the message; the bind below is the authoritative serialization point, so two
+        // hosts racing to start still cannot both win (milestone risk note).
         if UnixStream::connect(socket_path).is_ok() {
             anyhow::bail!(
-                "another LearnWhile host is already listening on {}",
+                "another LearnWhile host is already listening on {}. Only one host may run at a \
+                 time, so stop the other before starting this one.",
                 socket_path.display()
             );
         }
+        // No listener answered, so the file is stale (a killed host leaves it behind). Unlink it.
         std::fs::remove_file(socket_path)
             .with_context(|| format!("removing stale socket at {}", socket_path.display()))?;
     }
@@ -149,5 +156,44 @@ mod tests {
         assert!(oversized.contains("OversizedLine"));
         // The human-readable message is there too, not just the machine field.
         assert!(oversized.contains("discarded trigger frame"));
+    }
+
+    #[test]
+    fn bind_refuses_a_live_host_and_leaves_its_socket_untouched() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("host.sock");
+
+        let _first = bind(&path).expect("first host binds");
+
+        // A second host must refuse, name the socket, and must NOT unlink the live one.
+        let error = bind(&path).expect_err("second host must refuse");
+        assert!(
+            error.to_string().contains("already listening"),
+            "unexpected message: {error}"
+        );
+        assert!(path.exists(), "the live socket must not be unlinked");
+        assert!(
+            UnixStream::connect(&path).is_ok(),
+            "the first host must still be listening"
+        );
+    }
+
+    #[test]
+    fn bind_recovers_from_a_stale_socket_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("host.sock");
+
+        // A killed host leaves the socket file behind with no listener (dropping a UnixListener does
+        // not unlink it).
+        let dead = UnixListener::bind(&path).expect("first bind");
+        drop(dead);
+        assert!(
+            path.exists(),
+            "a stale socket file remains after the listener drops"
+        );
+
+        // Recovery: the connect probe fails, so bind unlinks the stale file and rebinds cleanly.
+        let _live = bind(&path).expect("bind recovers from a stale socket");
+        assert!(UnixStream::connect(&path).is_ok());
     }
 }

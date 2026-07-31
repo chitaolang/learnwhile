@@ -89,13 +89,15 @@ fn run_host() -> Result<()> {
     let _log_guard = logging::init(&logging::default_log_dir());
     tracing::info!("learnwhile host starting");
 
+    // Bind before opening the database, so a second host refuses without touching the first host's
+    // database at all (ADR-0003). The bind is the authoritative single-instance check.
+    let socket_path = default_socket_path();
+    let listener = listener::bind(&socket_path)?;
+
     let storage = Storage::open(&default_db_path())?;
     let expiry = Duration::seconds(storage.config_i64("trigger_expiry_seconds")?);
     let clock = Arc::new(SystemClock);
     let learning = Learning::new(storage, clock.clone())?;
-
-    let socket_path = default_socket_path();
-    let listener = listener::bind(&socket_path)?;
 
     let (tx, rx) = channel();
     spawn_producers(listener, tx);
