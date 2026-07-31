@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::Duration;
+use chrono::{DateTime, Duration, Local, LocalResult, NaiveDate, TimeZone, Utc};
 
 use crate::clock::Clock;
 use crate::scheduler::{Memory, Rating, Scheduler};
@@ -43,6 +43,9 @@ pub struct Learning {
     storage: Storage,
     clock: Arc<dyn Clock>,
     scheduler: Scheduler,
+    /// The daily cap on new-card introductions (ADR-0002), read from config. Left configurable and
+    /// not tuned in M3: `20` is a guess to revisit once `review_history` holds real data.
+    new_cards_per_day: i64,
     /// Identifies this host run in `review_history.session_id`. v1 has no real Session lifecycle
     /// (that is M4); a per-run id keeps the column populated until then.
     session_id: String,
@@ -53,12 +56,14 @@ impl Learning {
     /// Build the engine, reading `desired_retention` from config to construct the scheduler.
     pub fn new(storage: Storage, clock: Arc<dyn Clock>) -> Result<Self> {
         let desired_retention = storage.config_f64("desired_retention")? as f32;
+        let new_cards_per_day = storage.config_i64("new_cards_per_day")?;
         let scheduler = Scheduler::new(desired_retention)?;
         let session_id = format!("host-{}", clock.now().timestamp());
         Ok(Self {
             storage,
             clock,
             scheduler,
+            new_cards_per_day,
             session_id,
             review: ReviewState::Idle,
         })
@@ -148,11 +153,61 @@ impl Learning {
         Ok(())
     }
 
-    /// Placeholder selection (milestone step 9): any unreviewed card. Deliberate scaffolding — M3
-    /// replaces it with the honest due → new → idle order (ADR-0002). Kept to a handful of lines
-    /// on purpose; no due-date logic accumulates here.
+    /// The honest selection order (ADR-0002), evaluated fresh on each surfacing: a genuinely due
+    /// card, else a new card while today's introductions are under the daily cap, else nothing (the
+    /// idle state). A not-yet-due card is never pulled forward. M4 adds the one bounded exception
+    /// (the lapse queue, ADR-0010); until then this order holds without exception.
     fn select_next(&self) -> Result<Option<Card>> {
-        self.storage.unreviewed_card()
+        let now = self.clock.now();
+        if let Some(card) = self.storage.due_card(now)? {
+            return Ok(Some(card));
+        }
+        if self.introductions_today(now)? < self.new_cards_per_day {
+            return self.storage.unreviewed_card();
+        }
+        Ok(None)
+    }
+
+    /// How many new cards have been introduced during the local-timezone day containing `now`.
+    /// Shared by selection and, in the next step, the idle pane's new-remaining count.
+    fn introductions_today(&self, now: DateTime<Utc>) -> Result<i64> {
+        let (start, end) = local_day_bounds(now, &Local);
+        self.storage.introductions_between(start, end)
+    }
+}
+
+/// The half-open UTC window `[start, end)` covering the local-timezone day that contains `now`.
+/// The daily cap resets on the developer's own day boundary (milestone sub-task 3), not UTC, so it
+/// does not reset mid-afternoon for anyone. Generic over the timezone so it can be unit-tested with
+/// fixed offsets, free of the machine's actual zone; the host passes `Local`.
+fn local_day_bounds<Tz: TimeZone>(now: DateTime<Utc>, tz: &Tz) -> (DateTime<Utc>, DateTime<Utc>) {
+    let today = now.with_timezone(tz).date_naive();
+    let tomorrow = today.succ_opt().unwrap_or(today);
+    (
+        local_midnight_utc(today, tz),
+        local_midnight_utc(tomorrow, tz),
+    )
+}
+
+/// The UTC instant of local midnight on `date`. Handles the rare daylight-saving cases so it never
+/// panics: at a fall-back the day starts at the earlier midnight; at a spring-forward gap it starts
+/// when the clock jumps forward.
+fn local_midnight_utc<Tz: TimeZone>(date: NaiveDate, tz: &Tz) -> DateTime<Utc> {
+    let midnight = date.and_hms_opt(0, 0, 0).expect("00:00:00 is a valid time");
+    match tz.from_local_datetime(&midnight) {
+        LocalResult::Single(dt) => dt.with_timezone(&Utc),
+        LocalResult::Ambiguous(earliest, _latest) => earliest.with_timezone(&Utc),
+        LocalResult::None => {
+            // Local midnight fell in a spring-forward gap; step forward to the first valid instant.
+            let mut candidate = midnight;
+            for _ in 0..(24 * 60) {
+                candidate += Duration::minutes(1);
+                if let LocalResult::Single(dt) = tz.from_local_datetime(&candidate) {
+                    return dt.with_timezone(&Utc);
+                }
+            }
+            Utc.from_utc_datetime(&midnight)
+        }
     }
 }
 
@@ -161,28 +216,41 @@ mod tests {
     use super::*;
     use crate::clock::TestClock;
     use crate::storage::NewCard;
-    use chrono::{DateTime, TimeZone, Utc};
+    use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
 
     fn epoch() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 1, 1, 9, 0, 0).unwrap()
     }
 
-    /// A Learning engine over a temp database seeded with one card. Returns the db path so a test
-    /// can reopen it and confirm what persisted, and the TempDir so the file outlives the call.
-    fn one_card() -> (Learning, std::path::PathBuf, tempfile::TempDir) {
+    /// A Learning engine over a temp database seeded with `cards`. Returns the shared clock (to
+    /// advance), the db path (to reopen and inspect), and the TempDir (to keep the file alive).
+    fn learning_with(
+        cards: &[(&str, &str)],
+    ) -> (
+        Learning,
+        Arc<TestClock>,
+        std::path::PathBuf,
+        tempfile::TempDir,
+    ) {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("learnwhile.db");
         let mut storage = Storage::open(&path).expect("open");
-        storage
-            .seed_cards(
-                &[NewCard {
-                    front: "Q".into(),
-                    back: "A".into(),
-                }],
-                epoch(),
-            )
-            .expect("seed");
-        let learning = Learning::new(storage, TestClock::new(epoch())).expect("learning");
+        let seeded: Vec<NewCard> = cards
+            .iter()
+            .map(|(front, back)| NewCard {
+                front: (*front).to_string(),
+                back: (*back).to_string(),
+            })
+            .collect();
+        storage.seed_cards(&seeded, epoch()).expect("seed");
+        let clock = TestClock::new(epoch());
+        let learning = Learning::new(storage, clock.clone()).expect("learning");
+        (learning, clock, path, dir)
+    }
+
+    /// A Learning engine over one card, for the tests that only need the db path.
+    fn one_card() -> (Learning, std::path::PathBuf, tempfile::TempDir) {
+        let (learning, _clock, path, dir) = learning_with(&[("Q", "A")]);
         (learning, path, dir)
     }
 
@@ -238,5 +306,119 @@ mod tests {
             due.is_some(),
             "the card should have a due date after review"
         );
+    }
+
+    #[test]
+    fn a_new_card_is_selected_when_nothing_is_due() {
+        let (mut learning, _clock, _path, _dir) = learning_with(&[("q1", "a1")]);
+        learning.surface().expect("surface");
+        // Nothing has been reviewed, so nothing is due; a new card is introduced.
+        match learning.view() {
+            ReviewView::Question { front } => assert_eq!(front, "q1"),
+            _ => panic!("expected a new card"),
+        }
+    }
+
+    #[test]
+    fn a_due_card_is_selected_before_a_new_one() {
+        let (mut learning, clock, _path, _dir) = learning_with(&[("q1", "a1"), ("q2", "a2")]);
+        // Review q1 so it gains a future due date.
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Good).expect("rate");
+
+        // Advance well past q1's interval so it is due again; q2 is still new.
+        clock.advance(Duration::days(60));
+        learning.surface().expect("surface");
+        match learning.view() {
+            ReviewView::Question { front } => {
+                assert_eq!(front, "q1", "the due card must win over the new one")
+            }
+            _ => panic!("expected the due card"),
+        }
+    }
+
+    #[test]
+    fn a_not_yet_due_card_is_never_surfaced() {
+        let (mut learning, _clock, _path, _dir) = learning_with(&[("only", "card")]);
+        // Review the only card: its due date moves into the future.
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Good).expect("rate");
+
+        // Nothing is due and no new card remains, so nothing may be surfaced — not even this one
+        // card, ahead of its due date. This is the ADR-0002 guarantee.
+        learning.surface().expect("surface");
+        assert!(matches!(learning.view(), ReviewView::Empty));
+    }
+
+    #[test]
+    fn the_daily_cap_stops_new_card_introductions() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("learnwhile.db");
+        let mut storage = Storage::open(&path).expect("open");
+        storage
+            .seed_cards(
+                &[
+                    NewCard {
+                        front: "q1".into(),
+                        back: "a1".into(),
+                    },
+                    NewCard {
+                        front: "q2".into(),
+                        back: "a2".into(),
+                    },
+                ],
+                epoch(),
+            )
+            .expect("seed");
+        // Cap the day at a single new card, before Learning reads config.
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE config SET value = '1' WHERE key = 'new_cards_per_day'",
+                [],
+            )
+            .unwrap();
+
+        let mut learning = Learning::new(storage, TestClock::new(epoch())).expect("learning");
+
+        // The first new card is under the cap.
+        learning.surface().expect("surface");
+        assert!(matches!(
+            learning.view(),
+            ReviewView::Question { front: "q1" }
+        ));
+        learning.reveal();
+        learning.rate(Rating::Good).expect("rate");
+
+        // The cap is now spent: the second new card is not introduced, even while Waiting.
+        learning.surface().expect("surface");
+        assert!(matches!(learning.view(), ReviewView::Empty));
+    }
+
+    #[test]
+    fn local_day_bounds_track_a_positive_offset() {
+        // +08:00: local midnight is 16:00 the previous UTC day.
+        let tz = FixedOffset::east_opt(8 * 3600).unwrap();
+        // 2026-06-01 00:30 local = 2026-05-31 16:30 UTC.
+        let now = Utc.with_ymd_and_hms(2026, 5, 31, 16, 30, 0).unwrap();
+        let (start, end) = local_day_bounds(now, &tz);
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 5, 31, 16, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2026, 6, 1, 16, 0, 0).unwrap());
+        assert!(start <= now && now < end);
+    }
+
+    #[test]
+    fn local_day_bounds_handle_a_negative_offset_near_midnight() {
+        // -05:00, just before local midnight: the UTC date is already tomorrow, but the local day
+        // is still today — the classic off-by-one a UTC boundary gets wrong.
+        let tz = FixedOffset::west_opt(5 * 3600).unwrap();
+        // 2026-06-01 23:59 local = 2026-06-02 04:59 UTC.
+        let now = Utc.with_ymd_and_hms(2026, 6, 2, 4, 59, 0).unwrap();
+        let (start, end) = local_day_bounds(now, &tz);
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 6, 1, 5, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2026, 6, 2, 5, 0, 0).unwrap());
+        assert!(start <= now && now < end);
     }
 }
