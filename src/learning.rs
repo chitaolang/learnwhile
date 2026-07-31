@@ -141,7 +141,12 @@ impl Learning {
         };
 
         let schedule = self.scheduler.next(rating, memory, elapsed_days)?;
-        let new_due = now + Duration::days(schedule.interval_days.round() as i64);
+        // Clamp to a whole day at minimum. The scheduler is day-granular (ADR-0010), so the
+        // shortest interval it can honour is one day; without this an Again (~0.2 days) rounds to 0
+        // and the card would be due immediately, stealing the same-day return that ADR-0010 reserves
+        // for the lapse queue.
+        let interval_days = (schedule.interval_days.round() as i64).max(1);
+        let new_due = now + Duration::days(interval_days);
 
         self.storage.record_review(&ReviewRecord {
             card_id: card.id,
@@ -297,6 +302,28 @@ mod tests {
         learning.rate(Rating::Good).expect("rate");
         // Still on the question side: rating a card that has not been revealed is a no-op.
         assert!(matches!(learning.view(), ReviewView::Question { .. }));
+    }
+
+    #[test]
+    fn an_again_rated_card_is_scheduled_at_least_a_day_out() {
+        let (mut learning, _clock, path, _dir) = learning_with(&[("q", "a")]);
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Again).expect("rate");
+
+        // Day-granular scheduling: an Again is due tomorrow at the earliest, never the same instant,
+        // so same-day return is the lapse queue's job (M4), not due selection.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let due_raw: String = conn
+            .query_row("SELECT due FROM cards WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        let due = DateTime::parse_from_rfc3339(&due_raw)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            due >= epoch() + Duration::days(1),
+            "an Again must schedule at least a day out, got {due}"
+        );
     }
 
     #[test]
