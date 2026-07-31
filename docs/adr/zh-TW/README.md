@@ -16,6 +16,8 @@
 | [0006](./0006-trigger-expiry-drains-phantom-opens.md) | Open Trigger 會過期，因此遺失 close 不會讓卡片永遠卡住 |
 | [0007](./0007-ndjson-trigger-frames.md) | Adapter 傳送以 adapter 與 session 識別的 newline-delimited JSON frame |
 | [0008](./0008-single-binary-subcommands.md) | 同一個 binary 同時作為長駐 host 與 hook client |
+| [0009](./0009-single-event-loop-producer-threads.md) | Host 是由 producer thread 餵入的單一 event loop；沒有 async runtime |
+| [0010](./0010-lapsed-cards-requeue-within-session.md) | Lapse 過的卡片會在同一個 Session 內回來；禁止提前的規則跨 Session 仍然成立 |
 | [0011](./0011-session-is-host-process-lifetime.md) | 一個 Session 就是 host process 的生命週期 |
 
 ## 它們的關係
@@ -26,6 +28,11 @@
 - **0005** 指出遺失 Trigger close 必須可被容忍，但沒有說如何做到 -> **0006** 設定 expiry policy。
 - **0010** 讓 lapse queue「隨 Session 一起消滅」，但沒有說是什麼界定了一個 Session -> **0011** 把 Session 定義為 host process 的生命週期。
 - **0003** 建立 thin adapter 的方向，但沒有說如何發佈 -> **0008** 把 adapter 做成 host binary 的 subcommand。
+- **0004**、**0006** 與 Review flow 各自帶來一個 host 必須處理的輸入，卻沒有說它們如何共存 -> **0009** 把三者序列化到單一 event loop 上。
+
+有一筆紀錄收窄了較早的一筆：
+
+- **0010** 在 **0002** 禁止呈現尚未到期卡片的規則上，刻出一個以 Session 為界的例外。單讀 0002 時，這條禁令看起來是絕對的；它在跨 Session 與跨天的層面上確實絕對，而那正是保護 scheduler 的部分。
 
 ## 新增紀錄
 
