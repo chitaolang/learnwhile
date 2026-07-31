@@ -300,6 +300,21 @@ impl Storage {
         Ok(card)
     }
 
+    /// Fetch a single card by id, or `None` if it does not exist. Used to re-fetch a lapse-queue
+    /// card for a re-attempt (ADR-0010); the queue holds ids, storage holds the card.
+    pub fn card_by_id(&self, id: i64) -> Result<Option<Card>> {
+        let card = self
+            .conn
+            .query_row(
+                "SELECT id, front, back, stability, difficulty, reps, lapses, last_reviewed_at, due
+                 FROM cards WHERE id = ?1",
+                [id],
+                row_to_card,
+            )
+            .optional()?;
+        Ok(card)
+    }
+
     /// How many new cards were introduced in the half-open window `[start, end)`, derived from
     /// `review_history` rather than a counter so a restart cannot lose or double the count
     /// (milestone sub-task 4). A new-card introduction is a card's *first* Review, which is exactly
@@ -531,6 +546,24 @@ mod tests {
         assert!(card.stability.is_none());
         assert!(card.last_reviewed_at.is_none());
         assert!(card.due.is_none());
+    }
+
+    #[test]
+    fn card_by_id_fetches_a_card_or_none_for_a_missing_id() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+        storage
+            .seed_cards(
+                &[NewCard {
+                    front: "a".into(),
+                    back: "1".into(),
+                }],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        assert_eq!(storage.card_by_id(1).unwrap().expect("card 1").front, "a");
+        assert!(storage.card_by_id(999).unwrap().is_none());
     }
 
     /// A minimal `ReviewRecord` that sets a card's `due` for selection tests. Only `card_id` and
