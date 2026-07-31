@@ -1,0 +1,7 @@
+# 一個 Session 就是 host process 的生命週期
+
+**背景。** Lapse queue（ADR-0010）與 in-flight Review 都以 Session 為範圍：它們存在記憶體中，必須隨 Session 一起消滅，並讓受影響的卡片回到各自已持久化的到期日。因此程式碼需要知道 Session 何時結束。Glossary 把 Session 綁定在「一個 Trigger Adapter 處於連線狀態（大致上就是一次工作 sitting）」，但那是對概念的描述，不是 host 能夠檢測的條件。ADR-0004 讓 adapter fire-and-forget、沒有持久連線，而 ADR-0006 也已經確立 adapter 的存活狀態不可觀察——hooks 只會在 agent 發出事件時執行，而這正是等待之間缺少的訊號。因此「連線中」不是 host 能偵測到的東西，Session 的邊界必須以 host 能檢測的東西來定義。
+
+**決策。** 在 v1 中，一個 Session 就正好是 host process 的生命週期：它在 host 啟動時開始，在 process 結束時結束。Lapse queue 與 in-flight Review 都只是執行中 host 的普通記憶體欄位，不需要任何明確的開始或結束邏輯，因為 process 的啟動與退出已經界定了它們；Session 的任何內容都不會寫入磁碟。已拒絕：**idle-timeout Session**，也就是在 open-Trigger set 已空置數分鐘後才結束 Session，這比較接近 glossary 所描繪的「sitting」，但會加入一個 timer、一個 policy 常數，以及一條 discard 路徑——這些機制是 ADR-0010 的機能在 v1 並不需要的，而且是一個沒有資料可供調校的旋鈕，正是每日新卡上限已經背負的同一個反對理由。已拒絕：**每個 Waiting 區間一個 Session**，把它綁定在 open-Trigger set 非空之上，這會在每次 agent 回來時就丟棄 lapse queue——與 ADR-0010 的意圖正好相反，因為 lapse 過的卡片必須存活過緊接而來的那次等待，才可能被重新提供。
+
+**後果。** README 已經告訴開發者一次 sitting 啟動一次 host 然後就放著不管，所以在實務上 process 生命週期近似於一次 sitting。Host 重啟就是一個新的 Session：lapse queue 消失，受影響的卡片停在各自已持久化的到期日——這正是 M4 重啟測試釘住的行為，也是與系統其餘部分一致的 fail-open 結果。因為邊界就是 process 生命週期，沒有 Session-end 程式碼會出錯，也沒有 timer 需要串接到單一 event loop（ADR-0009）之上。代價是在同一個長駐 host 中的兩次 sitting 會共用一個 Session：如果 host 從未重啟，早上失敗的卡片到了下午仍然在 queue 裡。這在 v1 被接受。日後可以用更細緻的 Session 取代它，而不需要動到 ADR-0010，因為無論用什麼界定 Session，「queue 隨 Session 一起消滅」都仍然成立；若那個更細的邊界變得舉足輕重，它會贏得自己的紀錄，而不是在這裡被悄悄改動。

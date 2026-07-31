@@ -16,6 +16,7 @@
 | [0006](./0006-trigger-expiry-drains-phantom-opens.md) | Open Trigger 會過期，因此遺失 close 不會讓卡片永遠卡住 |
 | [0007](./0007-ndjson-trigger-frames.md) | Adapter 傳送以 adapter 與 session 識別的 newline-delimited JSON frame |
 | [0008](./0008-single-binary-subcommands.md) | 同一個 binary 同時作為長駐 host 與 hook client |
+| [0011](./0011-session-is-host-process-lifetime.md) | 一個 Session 就是 host process 的生命週期 |
 
 ## 它們的關係
 
@@ -23,6 +24,7 @@
 
 - **0003** 延後決定 IPC transport -> **0004** 選擇 Unix socket -> **0004** 又延後決定 message format -> **0007** 定義 frame。
 - **0005** 指出遺失 Trigger close 必須可被容忍，但沒有說如何做到 -> **0006** 設定 expiry policy。
+- **0010** 讓 lapse queue「隨 Session 一起消滅」，但沒有說是什麼界定了一個 Session -> **0011** 把 Session 定義為 host process 的生命週期。
 - **0003** 建立 thin adapter 的方向，但沒有說如何發佈 -> **0008** 把 adapter 做成 host binary 的 subcommand。
 
 ## 新增紀錄
