@@ -112,8 +112,9 @@ pub struct ReviewRecord {
 }
 
 /// A card read from storage, with enough state to conduct and persist a Review. `stability` and
-/// `difficulty` are `None` for a card not yet reviewed; `last_reviewed_at` is `None` until its
-/// first Review and is what the elapsed-days calculation reads.
+/// `difficulty` are `None` for a card not yet reviewed; `last_reviewed_at` and `due` are `None`
+/// until its first Review. `last_reviewed_at` is what the elapsed-days calculation reads, and `due`
+/// is what selection compares against the clock (ADR-0002).
 pub struct Card {
     pub id: i64,
     pub front: String,
@@ -123,6 +124,7 @@ pub struct Card {
     pub reps: i64,
     pub lapses: i64,
     pub last_reviewed_at: Option<DateTime<Utc>>,
+    pub due: Option<DateTime<Utc>>,
 }
 
 pub struct Storage {
@@ -259,9 +261,28 @@ impl Storage {
         let card = self
             .conn
             .query_row(
-                "SELECT id, front, back, stability, difficulty, reps, lapses, last_reviewed_at
+                "SELECT id, front, back, stability, difficulty, reps, lapses, last_reviewed_at, due
                  FROM cards WHERE state = 'new' ORDER BY id LIMIT 1",
                 [],
+                row_to_card,
+            )
+            .optional()?;
+        Ok(card)
+    }
+
+    /// The most-overdue card due at or before `now` (ADR-0002's first selection choice), or `None`
+    /// if nothing is due. "Due" is compared against the injected clock's `now`, passed in as a
+    /// bound parameter, never against SQLite's own time functions — otherwise tests could not
+    /// control what counts as due.
+    pub fn due_card(&self, now: DateTime<Utc>) -> Result<Option<Card>> {
+        let card = self
+            .conn
+            .query_row(
+                "SELECT id, front, back, stability, difficulty, reps, lapses, last_reviewed_at, due
+                 FROM cards
+                 WHERE state = 'review' AND due IS NOT NULL AND due <= ?1
+                 ORDER BY due ASC LIMIT 1",
+                [now.to_rfc3339()],
                 row_to_card,
             )
             .optional()?;
@@ -314,10 +335,11 @@ impl Storage {
     }
 }
 
-/// Map a `cards` row onto a [`Card`]. A stored `last_reviewed_at` that fails to parse is treated as
-/// absent, degrading to a first-Review rather than failing the read.
+/// Map a `cards` row onto a [`Card`]. A stored timestamp that fails to parse is treated as absent,
+/// degrading gracefully rather than failing the read.
 fn row_to_card(row: &rusqlite::Row) -> rusqlite::Result<Card> {
     let last_reviewed_at: Option<String> = row.get("last_reviewed_at")?;
+    let due: Option<String> = row.get("due")?;
     Ok(Card {
         id: row.get("id")?,
         front: row.get("front")?,
@@ -326,11 +348,17 @@ fn row_to_card(row: &rusqlite::Row) -> rusqlite::Result<Card> {
         difficulty: row.get("difficulty")?,
         reps: row.get("reps")?,
         lapses: row.get("lapses")?,
-        last_reviewed_at: last_reviewed_at.and_then(|raw| {
-            DateTime::parse_from_rfc3339(&raw)
-                .ok()
-                .map(|dt| dt.with_timezone(&Utc))
-        }),
+        last_reviewed_at: parse_timestamp(last_reviewed_at),
+        due: parse_timestamp(due),
+    })
+}
+
+/// Parse a stored RFC3339 timestamp, treating an unparseable or absent value as `None`.
+fn parse_timestamp(raw: Option<String>) -> Option<DateTime<Utc>> {
+    raw.and_then(|raw| {
+        DateTime::parse_from_rfc3339(&raw)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc))
     })
 }
 
@@ -369,6 +397,7 @@ pub fn default_db_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Duration, TimeZone};
 
     #[test]
     fn migration_creates_schema_and_seeds_defaults() {
@@ -442,6 +471,70 @@ mod tests {
         // A freshly seeded card carries no FSRS state yet.
         assert!(card.stability.is_none());
         assert!(card.last_reviewed_at.is_none());
+        assert!(card.due.is_none());
+    }
+
+    /// A minimal `ReviewRecord` that sets a card's `due` for selection tests. Only `card_id` and
+    /// `new_due` matter here; the rest are plausible filler.
+    fn reviewed_with_due(card_id: i64, due: DateTime<Utc>) -> ReviewRecord {
+        ReviewRecord {
+            card_id,
+            session_id: "test".into(),
+            reviewed_at: due - Duration::days(3),
+            rating: 3,
+            stability_before: None,
+            difficulty_before: None,
+            stability_after: 5.0,
+            difficulty_after: 5.0,
+            elapsed_days: 0,
+            scheduled_days: 3.0,
+            new_due: due,
+            new_reps: 1,
+            new_lapses: 0,
+        }
+    }
+
+    #[test]
+    fn due_card_returns_the_past_due_card_and_ignores_future_and_new_cards() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+        storage
+            .seed_cards(
+                &[
+                    NewCard {
+                        front: "past".into(),
+                        back: "p".into(),
+                    },
+                    NewCard {
+                        front: "future".into(),
+                        back: "f".into(),
+                    },
+                    NewCard {
+                        front: "new".into(),
+                        back: "n".into(),
+                    },
+                ],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        // Card 1 became due yesterday; card 2 is not due until tomorrow; card 3 stays new.
+        storage
+            .record_review(&reviewed_with_due(1, now - Duration::days(1)))
+            .expect("review 1");
+        storage
+            .record_review(&reviewed_with_due(2, now + Duration::days(1)))
+            .expect("review 2");
+
+        // Only the past-due card is returned, never the future one or the new one.
+        let due = storage.due_card(now).unwrap().expect("a due card");
+        assert_eq!(due.id, 1);
+        assert_eq!(due.front, "past");
+        assert!(due.due.is_some());
+
+        // Before that card came due, nothing is due at all.
+        assert!(storage.due_card(now - Duration::days(2)).unwrap().is_none());
     }
 
     #[test]
