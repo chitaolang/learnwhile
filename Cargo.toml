@@ -7,7 +7,9 @@ edition = "2024"
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", features = ["serde"] }
 crossterm = "0.29.0"
+fsrs = "6.6.1"
 ratatui = "0.30.2"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tempfile = { version = "3.27.0", optional = true }
