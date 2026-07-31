@@ -21,6 +21,7 @@ use learnwhile::frame::FrameType;
 use learnwhile::host::Host;
 use learnwhile::learning::Learning;
 use learnwhile::listener;
+use learnwhile::logging;
 use learnwhile::socket::default_socket_path;
 use learnwhile::storage::{NewCard, Storage, default_db_path};
 use ratatui::Terminal;
@@ -82,6 +83,12 @@ fn run_host() -> Result<()> {
     // migration or config error is then reported on a normal terminal rather than from behind the
     // TUI. The expiry now lives in `config` (ADR-0006); M1's hardcoded 1800 is gone. Later M2
     // steps hand this same handle to the Learning engine — for now only the expiry is read.
+    // Install the log file before anything else can fail, so a migration or bind error is on the
+    // record. Held for the whole function: dropping the guard flushes buffered lines. Never on the
+    // hook path (ADR-0008) — only here.
+    let _log_guard = logging::init(&logging::default_log_dir());
+    tracing::info!("learnwhile host starting");
+
     let storage = Storage::open(&default_db_path())?;
     let expiry = Duration::seconds(storage.config_i64("trigger_expiry_seconds")?);
     let clock = Arc::new(SystemClock);
@@ -115,7 +122,12 @@ fn run_host() -> Result<()> {
 /// The three producers of ADR-0009. Each translates one source into an `Event`; none holds state.
 fn spawn_producers(listener: std::os::unix::net::UnixListener, tx: Sender<Event>) {
     let socket_tx = tx.clone();
-    std::thread::spawn(move || listener::serve(listener, socket_tx));
+    std::thread::spawn(move || {
+        listener::serve(listener, socket_tx);
+        // `serve` loops forever in normal operation; returning means the accept loop died, which
+        // silently starves Trigger input (ADR-0009), so it must be visible in the log.
+        tracing::error!("socket accept thread exited");
+    });
 
     let input_tx = tx.clone();
     std::thread::spawn(move || {
@@ -127,7 +139,12 @@ fn spawn_producers(listener: std::os::unix::net::UnixListener, tx: Sender<Event>
                     }
                 }
                 Ok(_) => continue,
-                Err(_) => return,
+                // A read error stops key input for the rest of the run; log it rather than starving
+                // the input silently (ADR-0009).
+                Err(error) => {
+                    tracing::error!(%error, "terminal input thread stopped");
+                    return;
+                }
             }
         }
     });

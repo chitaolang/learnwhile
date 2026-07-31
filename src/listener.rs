@@ -50,7 +50,10 @@ pub fn serve(listener: UnixListener, tx: Sender<Event>) {
                 std::thread::spawn(move || handle_connection(stream, tx));
             }
             // An accept error is not fatal; the next accept may well succeed.
-            Err(_) => continue,
+            Err(error) => {
+                tracing::warn!(%error, "accept failed; continuing");
+                continue;
+            }
         }
     }
 }
@@ -95,6 +98,56 @@ fn handle_connection(stream: UnixStream, tx: Sender<Event>) {
     }
 }
 
-/// Drop a frame. Silent for now — M5 gives this a log file, which ADR-0007 requires precisely
-/// because silent discards make adapter bugs invisible.
-fn discard(_reason: DiscardReason) {}
+/// Drop a frame, recording why. ADR-0007 requires this log precisely because a silent discard
+/// makes an adapter bug invisible — the host stays fail-open, so the log is the only trace.
+fn discard(reason: DiscardReason) {
+    tracing::warn!(?reason, "discarded trigger frame");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// A `MakeWriter` that captures log output into a shared buffer, so a scoped subscriber can
+    /// assert what `discard` emitted without touching the global logger.
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl tracing_subscriber::fmt::MakeWriter<'_> for Capture {
+        type Writer = Capture;
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn discard_log(reason: DiscardReason) -> String {
+        let capture = Capture::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(capture.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || discard(reason));
+        String::from_utf8(capture.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[test]
+    fn every_discard_reason_is_logged_with_its_reason() {
+        assert!(discard_log(DiscardReason::Unparseable).contains("Unparseable"));
+        assert!(discard_log(DiscardReason::UnknownVersion(99)).contains("UnknownVersion(99)"));
+        let oversized = discard_log(DiscardReason::OversizedLine);
+        assert!(oversized.contains("OversizedLine"));
+        // The human-readable message is there too, not just the machine field.
+        assert!(oversized.contains("discarded trigger frame"));
+    }
+}

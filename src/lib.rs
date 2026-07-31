@@ -11,6 +11,7 @@ pub mod hook;
 pub mod host;
 pub mod learning;
 pub mod listener;
+pub mod logging;
 pub mod renderer;
 pub mod scheduler;
 pub mod socket;
