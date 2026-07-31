@@ -92,6 +92,25 @@ pub struct SeedOutcome {
     pub skipped: usize,
 }
 
+/// One completed Review to persist: the card's new FSRS state and due date, plus the full
+/// `review_history` row. `*_before` are `None` on a first Review (no prior memory state), which is
+/// how the audit trail distinguishes it. Built by the Learning engine, written by [`Storage`].
+pub struct ReviewRecord {
+    pub card_id: i64,
+    pub session_id: String,
+    pub reviewed_at: DateTime<Utc>,
+    pub rating: i64,
+    pub stability_before: Option<f32>,
+    pub difficulty_before: Option<f32>,
+    pub stability_after: f32,
+    pub difficulty_after: f32,
+    pub elapsed_days: i64,
+    pub scheduled_days: f32,
+    pub new_due: DateTime<Utc>,
+    pub new_reps: i64,
+    pub new_lapses: i64,
+}
+
 /// A card read from storage, with enough state to conduct and persist a Review. `stability` and
 /// `difficulty` are `None` for a card not yet reviewed; `last_reviewed_at` is `None` until its
 /// first Review and is what the elapsed-days calculation reads.
@@ -124,6 +143,9 @@ impl Storage {
             .with_context(|| format!("opening database {}", path.display()))?;
         // Enforce the foreign keys declared in the schema; SQLite leaves them off by default.
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        // A generous busy timeout so a brief write lock (a second connection reading after a
+        // Review commits, in tests or later readers) waits rather than erroring immediately.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let mut storage = Self { conn };
         storage.migrate()?;
         Ok(storage)
@@ -135,15 +157,16 @@ impl Storage {
         let version: i64 = self
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version < 1 {
+        if version < SCHEMA_VERSION {
             let tx = self.conn.transaction()?;
             tx.execute_batch(CREATE_CONFIG)?;
             tx.execute_batch(MIGRATION_V1)?;
             tx.commit()?;
+            // `user_version` is a header write, not a bound parameter, so it cannot be prepared.
+            // Stamped only when a migration actually ran, so a normal open performs no write.
+            self.conn
+                .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
-        // `user_version` is a header write, not a bound parameter, so it cannot be prepared.
-        self.conn
-            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
 
@@ -243,6 +266,51 @@ impl Storage {
             )
             .optional()?;
         Ok(card)
+    }
+
+    /// Persist one completed Review: update the card's FSRS state and due date, and append the
+    /// append-only `review_history` row, in a single transaction (spec §Review flow, §Schema). Both
+    /// land or neither does, so a crash cannot leave the card advanced without its audit row, nor
+    /// the reverse.
+    pub fn record_review(&mut self, review: &ReviewRecord) -> Result<()> {
+        let reviewed_at = review.reviewed_at.to_rfc3339();
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "UPDATE cards
+             SET stability = ?2, difficulty = ?3, due = ?4, reps = ?5, lapses = ?6,
+                 state = 'review', last_reviewed_at = ?7
+             WHERE id = ?1",
+            rusqlite::params![
+                review.card_id,
+                review.stability_after,
+                review.difficulty_after,
+                review.new_due.to_rfc3339(),
+                review.new_reps,
+                review.new_lapses,
+                reviewed_at,
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO review_history
+                 (card_id, session_id, reviewed_at, rating,
+                  stability_before, difficulty_before, stability_after, difficulty_after,
+                  elapsed_days, scheduled_days)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                review.card_id,
+                review.session_id,
+                reviewed_at,
+                review.rating,
+                review.stability_before,
+                review.difficulty_before,
+                review.stability_after,
+                review.difficulty_after,
+                review.elapsed_days,
+                review.scheduled_days,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 }
 

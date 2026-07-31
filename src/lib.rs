@@ -9,6 +9,7 @@ pub mod event;
 pub mod frame;
 pub mod hook;
 pub mod host;
+pub mod learning;
 pub mod listener;
 pub mod renderer;
 pub mod scheduler;
