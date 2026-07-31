@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
 const DB_NAME: &str = "learnwhile.db";
@@ -76,6 +77,20 @@ CREATE TABLE config (
 
 /// The default deck every v1 card belongs to. v1 has exactly one deck (spec §Schema).
 pub const DEFAULT_DECK_ID: i64 = 1;
+
+/// A card as it arrives from `seed`, before it has any FSRS state. Front and back are the parsed
+/// TSV columns; the content hash used for idempotency is computed from them at insert time.
+pub struct NewCard {
+    pub front: String,
+    pub back: String,
+}
+
+/// What a `seed` run did: how many cards were inserted versus skipped because their content hash
+/// was already present.
+pub struct SeedOutcome {
+    pub added: usize,
+    pub skipped: usize,
+}
 
 pub struct Storage {
     conn: Connection,
@@ -153,6 +168,69 @@ impl Storage {
             .parse::<f64>()
             .with_context(|| format!("config key {key:?} holds non-number {raw:?}"))
     }
+
+    /// Insert each card into the default deck, skipping any whose content hash already exists, so
+    /// re-running `seed` on the same file is idempotent (spec §Card seeding). All inserts share one
+    /// transaction and one `created_at`. New cards carry no FSRS state: `state` defaults to `new`
+    /// and `stability`/`difficulty`/`due`/`last_reviewed_at` stay null until the first Review.
+    pub fn seed_cards(
+        &mut self,
+        cards: &[NewCard],
+        created_at: DateTime<Utc>,
+    ) -> Result<SeedOutcome> {
+        let created = created_at.to_rfc3339();
+        let tx = self.conn.transaction()?;
+        let mut added = 0usize;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO cards (deck_id, front, back, content_hash, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(content_hash) DO NOTHING",
+            )?;
+            for card in cards {
+                let hash = content_hash(&card.front, &card.back);
+                // `execute` returns rows changed: 1 when inserted, 0 when the hash already existed.
+                added += stmt.execute(rusqlite::params![
+                    DEFAULT_DECK_ID,
+                    &card.front,
+                    &card.back,
+                    hash,
+                    &created,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(SeedOutcome {
+            added,
+            skipped: cards.len() - added,
+        })
+    }
+
+    /// Total number of cards across all decks. Used by tests and, later, the idle-state counts.
+    pub fn card_count(&self) -> Result<i64> {
+        let count = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))?;
+        Ok(count)
+    }
+}
+
+/// A stable 64-bit FNV-1a hash of a card's content, as hex. Chosen over a crypto hash because the
+/// only requirement is a stable, collision-resistant key for one local deck — not a dependency.
+/// The `0x1f` unit separator keeps `("ab", "c")` from colliding with `("a", "bc")`.
+fn content_hash(front: &str, back: &str) -> String {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET_BASIS;
+    for byte in front
+        .bytes()
+        .chain(std::iter::once(0x1f))
+        .chain(back.bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("{hash:016x}")
 }
 
 /// `$XDG_DATA_HOME/learnwhile/learnwhile.db`, falling back to `$HOME/.local/share/...` when the
@@ -193,6 +271,52 @@ mod tests {
             )
             .expect("default deck");
         assert_eq!(deck_name, "Default");
+    }
+
+    #[test]
+    fn seeding_inserts_new_cards_and_skips_duplicates_on_reseed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+
+        let cards = vec![
+            NewCard {
+                front: "a".into(),
+                back: "1".into(),
+            },
+            NewCard {
+                front: "b".into(),
+                back: "2".into(),
+            },
+        ];
+
+        let first = storage.seed_cards(&cards, Utc::now()).expect("first seed");
+        assert_eq!((first.added, first.skipped), (2, 0));
+
+        // Re-seeding the identical cards inserts nothing: the milestone's idempotency test.
+        let second = storage.seed_cards(&cards, Utc::now()).expect("second seed");
+        assert_eq!((second.added, second.skipped), (0, 2));
+
+        assert_eq!(storage.card_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn same_front_with_a_different_back_is_a_distinct_card() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+
+        let cards = vec![
+            NewCard {
+                front: "q".into(),
+                back: "one".into(),
+            },
+            NewCard {
+                front: "q".into(),
+                back: "two".into(),
+            },
+        ];
+
+        let outcome = storage.seed_cards(&cards, Utc::now()).expect("seed");
+        assert_eq!(outcome.added, 2);
     }
 
     #[test]

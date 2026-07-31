@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration as StdDuration;
 
-use anyhow::Result;
-use chrono::Duration;
+use anyhow::{Context, Result};
+use chrono::{Duration, Utc};
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -21,7 +21,7 @@ use learnwhile::frame::FrameType;
 use learnwhile::host::Host;
 use learnwhile::listener;
 use learnwhile::socket::default_socket_path;
-use learnwhile::storage::{Storage, default_db_path};
+use learnwhile::storage::{NewCard, Storage, default_db_path};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
@@ -39,8 +39,10 @@ fn main() {
             std::process::exit(0);
         }
         Some("seed") => {
-            eprintln!("`seed` arrives in M2 — see docs/milestones/M2-cards-and-reviews.md");
-            std::process::exit(1);
+            if let Err(error) = run_seed(&args[1..]) {
+                eprintln!("learnwhile: {error:#}");
+                std::process::exit(1);
+            }
         }
         None | Some("host") => {
             if let Err(error) = run_host() {
@@ -135,4 +137,71 @@ fn spawn_producers(listener: std::os::unix::net::UnixListener, tx: Sender<Event>
             }
         }
     });
+}
+
+/// The `seed` subcommand: ingest a tab-separated front/back file into the default deck, skipping
+/// rows already present (spec §Card seeding). Deliberately TSV-only — it is a developer affordance,
+/// not the deferred Anki Import/Export, and must not accrete format support.
+fn run_seed(rest: &[String]) -> Result<()> {
+    let path = rest.first().context("usage: learnwhile seed <file.tsv>")?;
+    let contents =
+        std::fs::read_to_string(path).with_context(|| format!("reading seed file {path}"))?;
+    let cards = parse_tsv(&contents);
+
+    let mut storage = Storage::open(&default_db_path())?;
+    let outcome = storage.seed_cards(&cards, Utc::now())?;
+
+    println!(
+        "{} added, {} skipped (already present)",
+        outcome.added, outcome.skipped
+    );
+    Ok(())
+}
+
+/// Parse front/back pairs, one per line, split on the first tab. Lines with no tab (including
+/// blanks) and rows with an empty front or back are skipped rather than aborting the import, so one
+/// typo does not cost the whole file. Splitting on the first tab means a back field may contain tabs.
+fn parse_tsv(contents: &str) -> Vec<NewCard> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let (front, back) = line.split_once('\t')?;
+            let front = front.trim();
+            let back = back.trim();
+            if front.is_empty() || back.is_empty() {
+                return None;
+            }
+            Some(NewCard {
+                front: front.to_string(),
+                back: back.to_string(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tsv_skips_blank_and_tabless_lines() {
+        let cards = parse_tsv("front\tback\n\nno tab here\n   \nq\ta\n");
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].front, "front");
+        assert_eq!(cards[0].back, "back");
+        assert_eq!(cards[1].front, "q");
+    }
+
+    #[test]
+    fn parse_tsv_splits_on_the_first_tab_so_a_back_may_contain_tabs() {
+        let cards = parse_tsv("f\tb1\tb2\n");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].back, "b1\tb2");
+    }
+
+    #[test]
+    fn parse_tsv_skips_rows_with_an_empty_side() {
+        let cards = parse_tsv("\tonly back\nfront only\t\n");
+        assert!(cards.is_empty());
+    }
 }
