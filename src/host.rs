@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use anyhow::Result;
-use chrono::Duration;
+use chrono::{DateTime, Duration, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
@@ -147,8 +147,16 @@ where
         let state = match learning.view() {
             ReviewView::Question { front } if waiting => PaneState::Question { front },
             ReviewView::Answer { front, back } if waiting => PaneState::Answer { front, back },
-            // Not waiting, or waiting with nothing left to review: the idle pane.
-            _ => PaneState::Idle,
+            // Not waiting, or waiting with nothing left to review: the idle pane with real counts.
+            _ => {
+                let stats = learning.idle_stats()?;
+                PaneState::Idle {
+                    waiting,
+                    due_today: stats.due_today,
+                    new_remaining: stats.new_remaining,
+                    next_due: stats.next_due.map(format_local),
+                }
+            }
         };
 
         let completed = terminal.draw(|frame| draw(frame, &state))?;
@@ -157,6 +165,13 @@ where
         }
         Ok(())
     }
+}
+
+/// Format a due time in the developer's local timezone for the idle pane.
+fn format_local(when: DateTime<Utc>) -> String {
+    when.with_timezone(&Local)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 fn is_quit(key: &KeyEvent) -> bool {

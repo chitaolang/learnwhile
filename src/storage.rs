@@ -315,6 +315,28 @@ impl Storage {
         Ok(count)
     }
 
+    /// How many cards are due at or before `now` — the idle pane's due count, matching what
+    /// [`Storage::due_card`] would surface.
+    pub fn due_count(&self, now: DateTime<Utc>) -> Result<i64> {
+        let count = self.conn.query_row(
+            "SELECT COUNT(*) FROM cards WHERE state = 'review' AND due IS NOT NULL AND due <= ?1",
+            [now.to_rfc3339()],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// The earliest due time strictly after `now` among reviewed cards, or `None` if nothing is
+    /// pending — the idle pane's "next due" line. `MIN` over RFC3339 UTC text is chronological.
+    pub fn next_due_after(&self, now: DateTime<Utc>) -> Result<Option<DateTime<Utc>>> {
+        let raw: Option<String> = self.conn.query_row(
+            "SELECT MIN(due) FROM cards WHERE state = 'review' AND due IS NOT NULL AND due > ?1",
+            [now.to_rfc3339()],
+            |row| row.get(0),
+        )?;
+        Ok(parse_timestamp(raw))
+    }
+
     /// Persist one completed Review: update the card's FSRS state and due date, and append the
     /// append-only `review_history` row, in a single transaction (spec §Review flow, §Schema). Both
     /// land or neither does, so a crash cannot leave the card advanced without its audit row, nor
@@ -609,6 +631,50 @@ mod tests {
 
         // Card 1 is now 'review', so only one new card remains.
         assert_eq!(storage.new_card_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn due_count_and_next_due_after_split_on_now() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+        storage
+            .seed_cards(
+                &[
+                    NewCard {
+                        front: "a".into(),
+                        back: "1".into(),
+                    },
+                    NewCard {
+                        front: "b".into(),
+                        back: "2".into(),
+                    },
+                ],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        let now = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+        // Card 1 is due in the past, card 2 in the future.
+        storage
+            .record_review(&reviewed_with_due(1, now - Duration::hours(1)))
+            .expect("r1");
+        storage
+            .record_review(&reviewed_with_due(2, now + Duration::days(2)))
+            .expect("r2");
+
+        assert_eq!(storage.due_count(now).unwrap(), 1);
+        assert_eq!(
+            storage.next_due_after(now).unwrap(),
+            Some(now + Duration::days(2))
+        );
+
+        // With nothing scheduled ahead, next_due_after is None.
+        assert!(
+            storage
+                .next_due_after(now + Duration::days(3))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

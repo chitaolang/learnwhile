@@ -39,6 +39,15 @@ pub enum ReviewView<'a> {
     Empty,
 }
 
+/// What the idle pane reports (milestone sub-task 5): how many cards are due now, how many new
+/// cards can still be introduced today, and when the next card comes due. Enough to tell "nothing
+/// due" apart from "not Waiting", so a developer seeing the idle pane does not file a bug.
+pub struct IdleStats {
+    pub due_today: i64,
+    pub new_remaining: i64,
+    pub next_due: Option<DateTime<Utc>>,
+}
+
 pub struct Learning {
     storage: Storage,
     clock: Arc<dyn Clock>,
@@ -169,10 +178,27 @@ impl Learning {
     }
 
     /// How many new cards have been introduced during the local-timezone day containing `now`.
-    /// Shared by selection and, in the next step, the idle pane's new-remaining count.
+    /// Shared by selection and the idle pane's new-remaining count.
     fn introductions_today(&self, now: DateTime<Utc>) -> Result<i64> {
         let (start, end) = local_day_bounds(now, &Local);
         self.storage.introductions_between(start, end)
+    }
+
+    /// The counts the idle pane shows. `new_remaining` is what a developer will still be offered
+    /// today: the cap minus today's introductions, but never more than the new cards left in the
+    /// deck, and never negative.
+    pub fn idle_stats(&self) -> Result<IdleStats> {
+        let now = self.clock.now();
+        let introduced = self.introductions_today(now)?;
+        let new_available = self.storage.new_card_count()?;
+        let new_remaining = (self.new_cards_per_day - introduced)
+            .max(0)
+            .min(new_available);
+        Ok(IdleStats {
+            due_today: self.storage.due_count(now)?,
+            new_remaining,
+            next_due: self.storage.next_due_after(now)?,
+        })
     }
 }
 
@@ -395,6 +421,29 @@ mod tests {
         // The cap is now spent: the second new card is not introduced, even while Waiting.
         learning.surface().expect("surface");
         assert!(matches!(learning.view(), ReviewView::Empty));
+    }
+
+    #[test]
+    fn idle_stats_report_due_new_remaining_and_next_due() {
+        let (mut learning, clock, _path, _dir) =
+            learning_with(&[("q1", "a1"), ("q2", "a2"), ("q3", "a3")]);
+        // Introduce and review q1: it gains a future due date.
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Good).expect("rate");
+
+        let stats = learning.idle_stats().expect("stats");
+        // Nothing is due yet; one new card was introduced today, two remain of the deck's three.
+        assert_eq!(stats.due_today, 0);
+        assert_eq!(stats.new_remaining, 2);
+        assert!(
+            stats.next_due.is_some(),
+            "q1's future due should be reported"
+        );
+
+        // Advance past q1's interval: it is now due.
+        clock.advance(Duration::days(60));
+        assert_eq!(learning.idle_stats().expect("stats").due_today, 1);
     }
 
     #[test]

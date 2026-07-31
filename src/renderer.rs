@@ -16,9 +16,14 @@ pub enum PaneState<'a> {
     Question { front: &'a str },
     /// Waiting, answer side: front and back, after the reveal key.
     Answer { front: &'a str, back: &'a str },
-    /// Not Waiting, or Waiting with nothing left to review. M3 replaces this placeholder with real
-    /// due/new counts and the next due time.
-    Idle,
+    /// Not Waiting, or Waiting with nothing left to review. Carries the real counts so the pane
+    /// tells "nothing due" apart from "not Waiting". `next_due` is preformatted for display.
+    Idle {
+        waiting: bool,
+        due_today: i64,
+        new_remaining: i64,
+        next_due: Option<String>,
+    },
 }
 
 pub fn draw(frame: &mut Frame, state: &PaneState) {
@@ -53,17 +58,36 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
             ]),
             "1 Again   2 Hard   3 Good   4 Easy    q quit",
         ),
-        PaneState::Idle => (
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Not waiting",
-                    Style::default().add_modifier(Modifier::DIM),
-                )),
-                Line::from(""),
-                Line::from("Submit a prompt to your agent and a card will appear here."),
-            ]),
-            "q quit",
-        ),
+        PaneState::Idle {
+            waiting,
+            due_today,
+            new_remaining,
+            next_due,
+        } => {
+            let (header, header_modifier) = if *waiting {
+                ("Waiting", Modifier::BOLD)
+            } else {
+                ("Not waiting", Modifier::DIM)
+            };
+            let next = match next_due {
+                Some(when) => format!("Next due: {when}"),
+                None => "Next due: nothing scheduled".to_string(),
+            };
+            (
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        header,
+                        Style::default().add_modifier(header_modifier),
+                    )),
+                    Line::from(""),
+                    Line::from(format!(
+                        "Due now: {due_today}    New remaining: {new_remaining}"
+                    )),
+                    Line::from(next),
+                ]),
+                "q quit",
+            )
+        }
     };
 
     frame.render_widget(body.block(block).wrap(Wrap { trim: true }), areas[0]);
