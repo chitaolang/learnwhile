@@ -25,7 +25,7 @@ checks. Both need the alias and `XDG_DATA_HOME`. Socket is shared at `/tmp/learn
 Two facts about M3 that shape every test below:
 
 - **The daily cap is 20 by default**, which is too many to exhaust by hand. Lower it to make the
-  cap testable: `db "UPDATE config SET value='2' WHERE key='new_cards_per_day'"`. The host reads it
+  cap testable: `lw config set new_cards_per_day 2`. The host reads it
   at startup, so set it while the host is stopped.
 - **"Due" and the day boundary are time-based.** By hand you cannot fast-forward days, so the tests
   that need a due card or a cap rollover are marked as **needs time travel** and are only fully
@@ -68,9 +68,9 @@ This is the cap holding within a day: the deck was not dumped on you.
 
 ## 5. Raising the cap lets more new cards in (same day)
 
-- [ ] Quit the host. Raise the cap: `db "UPDATE config SET value='4' WHERE key='new_cards_per_day'"`.
+- [ ] Quit the host. Raise the cap: `lw config set new_cards_per_day 4`.
 - [ ] Start the host, open a Trigger. A new card (`front3`) surfaces again, because the cap now allows two more today.
-- [ ] `db "SELECT front, state FROM cards ORDER BY id"` shows the first cards as `review` and the later ones still `new`.
+- [ ] `lw cards` shows the first cards as `review` and the later ones still `new`.
 
 ## 6. The idle pane distinguishes "nothing due" from "not waiting"
 

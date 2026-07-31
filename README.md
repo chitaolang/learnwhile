@@ -86,6 +86,28 @@ again without duplicating anything. This is a convenience for trying LearnWhile,
 Anki-style importer, so it takes TSV and nothing else. The database lives under your XDG data
 directory (`$XDG_DATA_HOME/learnwhile/`, or `~/.local/share/learnwhile/`).
 
+## Inspecting and tuning
+
+Two subcommands read the same database. Run them with the host stopped or running, it makes no
+difference:
+
+```sh
+learnwhile config                           # list settings
+learnwhile config set new_cards_per_day 30  # change one
+learnwhile cards                            # list the deck and how each card is scheduled
+```
+
+The settings are:
+
+| Key | Default | What it does |
+|---|---|---|
+| `trigger_expiry_seconds` | `1800` | how long a Trigger stays open before a lost close expires it |
+| `desired_retention` | `0.9` | the FSRS target recall probability |
+| `new_cards_per_day` | `20` | the daily cap on new-card introductions |
+
+The host reads config at startup, so restart it after a change. `config set` refuses an unknown
+key or a value the host could not use, so a typo fails here rather than at the next launch.
+
 ## Run
 
 ```sh
@@ -257,6 +279,27 @@ learnwhile seed cards.tsv
 重複執行是安全的。已經在牌組裡的卡片會被略過，所以你可以修改檔案後再次匯入，不會產生重複。
 這只是讓你方便試用 LearnWhile 的功能，並不是 Anki 那種匯入器，因此它只吃 TSV、不吃其他格式。
 資料庫存放在你的 XDG 資料目錄底下（`$XDG_DATA_HOME/learnwhile/`，或 `~/.local/share/learnwhile/`）。
+
+## 檢視與調整
+
+有兩個子指令會讀取同一個資料庫。host 有沒有在執行都可以跑，沒有差別：
+
+```sh
+learnwhile config                           # 列出設定
+learnwhile config set new_cards_per_day 30  # 修改其中一項
+learnwhile cards                            # 列出牌組，以及每張卡片的排程狀況
+```
+
+設定項目如下：
+
+| 鍵 | 預設值 | 作用 |
+|---|---|---|
+| `trigger_expiry_seconds` | `1800` | 一個 Trigger 在遺失 close 後過期之前會維持開啟多久 |
+| `desired_retention` | `0.9` | FSRS 的目標記憶保留率 |
+| `new_cards_per_day` | `20` | 每日新卡引入的上限 |
+
+Host 在啟動時讀取 config，所以改完之後要重啟才會生效。`config set` 會拒絕未知的鍵，或 host
+無法使用的值，因此打錯字會在這裡就失敗，而不是在下次啟動時才出錯。
 
 ## 執行
 

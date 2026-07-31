@@ -21,7 +21,7 @@ export XDG_DATA_HOME=/tmp/lw-test              # isolate the deck; reset with: r
 You will use two terminals:
 
 - **Terminal A** runs the host (a full-screen TUI).
-- **Terminal B** runs `seed`, the hook, and `sqlite3` checks.
+- **Terminal B** runs `seed`, the hook, and inspection commands: `lw config` / `lw cards` for config and deck, and `sqlite3` (the `db` alias) for `review_history`, which has no subcommand.
 
 Both need the alias and `XDG_DATA_HOME`. The socket is shared automatically at
 `/tmp/learnwhile.sock` (your `XDG_RUNTIME_DIR` is unset). The database is at
@@ -48,7 +48,7 @@ alias db='sqlite3 -header -column /tmp/lw-test/learnwhile/learnwhile.db'
   printf 'Borrow checker\tEnforces ownership at compile time\n' >> /tmp/deck.tsv
   lw seed /tmp/deck.tsv        # 1 added, 3 skipped
   ```
-- [ ] `db "SELECT id, front, state, due, reps FROM cards;"` shows 4 rows, all `state=new`, `due` empty, `reps=0`.
+- [ ] `lw cards` lists 4 rows, each `state` = `new`, `due` shown as `-`, `reps` = `0`.
 
 ## 2. Seed is TSV-only and tolerates junk
 
@@ -62,7 +62,7 @@ alias db='sqlite3 -header -column /tmp/lw-test/learnwhile/learnwhile.db'
 ## 3. Database and migration
 
 - [ ] `db ".tables"` lists `cards config decks review_history`.
-- [ ] `db "SELECT * FROM config;"` shows `trigger_expiry_seconds=1800`, `desired_retention=0.9`, `new_cards_per_day=20`.
+- [ ] `lw config` shows `trigger_expiry_seconds = 1800`, `desired_retention = 0.9`, `new_cards_per_day = 20`.
 
 ## 4. Idle vs Waiting, and the question side
 
@@ -81,13 +81,13 @@ alias db='sqlite3 -header -column /tmp/lw-test/learnwhile/learnwhile.db'
 Without quitting, in Terminal B:
 
 - [ ] `db "SELECT card_id, rating, stability_after, difficulty_after, elapsed_days, scheduled_days FROM review_history;"` shows one row, `rating=3`, real numbers, `elapsed_days=0`.
-- [ ] `db "SELECT id, state, due, reps FROM cards WHERE id=1;"` shows `state=review`, `reps=1`, and a real future `due` date.
+- [ ] `lw cards` shows card `1` now `state` = `review`, `reps` = `1`, and a real future `due` date.
 
 ## 7. All four ratings, including Again
 
 - [ ] Rate the remaining cards, one per rating, watching the pane advance each time: `space` then `1` (Again), `space` then `2` (Hard), `space` then `4` (Easy).
 - [ ] `db "SELECT card_id, rating FROM review_history ORDER BY id;"` shows ratings `3, 1, 2, 4`.
-- [ ] The Again card recorded a lapse: `db "SELECT front, lapses FROM cards WHERE lapses>0;"` shows one card with `lapses=1`. An Again still counts as a completed Review. (Known M2 limitation: it is scheduled days out and will not return today.)
+- [ ] The Again card recorded a lapse: `lw cards` shows one card with `lapses` = `1`. An Again still counts as a completed Review. (Known M2 limitation: it is scheduled days out and will not return today.)
 
 ## 8. Deck exhaustion falls back to idle
 
@@ -101,10 +101,10 @@ Without quitting, in Terminal B:
 
 ## 10. Config-driven expiry drains a lost close
 
-- [ ] Quit the host, then shrink the expiry: `db "UPDATE config SET value='5' WHERE key='trigger_expiry_seconds';"`.
+- [ ] Quit the host, then shrink the expiry: `lw config set trigger_expiry_seconds 5`.
 - [ ] Start `lw host`, open a trigger and never close it: `printf '{"session_id":"lost"}' | lw hook --open`.
 - [ ] The card clears on its own within about 30 seconds (the sweep runs every 30s), with no close sent.
-- [ ] Reset: `db "UPDATE config SET value='1800' WHERE key='trigger_expiry_seconds';"`.
+- [ ] Reset: `lw config set trigger_expiry_seconds 1800`.
 
 ## 11. Fail-open still holds
 

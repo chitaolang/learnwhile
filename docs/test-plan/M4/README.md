@@ -52,11 +52,11 @@ lwclose() { printf '{"session_id":"s"}' | lw hook --close; }
 
 ## 2. A revealed card survives its Trigger expiring
 
-- [ ] Quit the host (`q`). Shrink the expiry: `db "UPDATE config SET value='5' WHERE key='trigger_expiry_seconds'"`. Start `lw host` again.
+- [ ] Quit the host (`q`). Shrink the expiry: `lw config set trigger_expiry_seconds 5`. Start `lw host` again.
 - [ ] `lwopen`, press space to reveal `back1`, and do not rate.
 - [ ] Wait about 30 seconds without sending a `lwclose`. The Trigger expires and the pane clears on its own.
 - [ ] `lwopen` again. The card resumes, still revealed. Expiry cleared the pane but did not discard the in-flight review.
-- [ ] Reset the expiry: quit, `db "UPDATE config SET value='1800' WHERE key='trigger_expiry_seconds'"`, restart.
+- [ ] Reset the expiry: quit, `lw config set trigger_expiry_seconds 1800`, restart.
 
 ## 3. Ignoring a card carries no penalty
 
@@ -81,12 +81,12 @@ lwclose() { printf '{"session_id":"s"}' | lw hook --close; }
 - [ ] `lwopen`, reveal `front1`, rate `1` (Again). `front1` is re-offered (queue holds it).
 - [ ] Quit the host with `q`, then start `lw host` again. This is a new Session.
 - [ ] `lwopen`. `front2` (a new card) appears, **not** `front1`. The failed card is not re-offered, because the queue did not survive and the card is due tomorrow, not now.
-- [ ] Confirm it sits at a future due date: `db "SELECT front, state, due FROM cards"` shows `front1` as `review` with a `due` a day or more ahead.
+- [ ] Confirm it sits at a future due date: `lw cards` shows `front1` as `review` with a `due` a day or more ahead.
 
 ## 7. Again is a completed Review that reschedules
 
 - [ ] After rating a card Again in any section above, `db "SELECT card_id, rating FROM review_history ORDER BY id DESC LIMIT 1"` shows a row with `rating = 1`. A Lapse is a completed Review, not a skipped one.
-- [ ] The card was rescheduled, not left null: `db "SELECT front, due, reps, lapses FROM cards WHERE lapses > 0"` shows a real `due` and `lapses = 1`.
+- [ ] The card was rescheduled, not left null: `lw cards` shows the failed card as `review` with a real `due` and `lapses` = `1`.
 
 ## Reset
 
