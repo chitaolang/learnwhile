@@ -7,9 +7,10 @@ When you hand work to your agent, a card appears in a pane beside it. When the a
 back, the card clears. The pane never steals focus, and nothing is ever blocked: if LearnWhile
 is not running, your agent behaves exactly as it always has.
 
-**Status: M1 — the Trigger spine.** Triggers, the pane, and fail-open all work end to end. The
-card is a hardcoded placeholder; real cards, FSRS scheduling, and persistence arrive in M2 and
-M3. See [`docs/milestones/`](./docs/milestones/README.md).
+**Status: M2 — cards and reviews.** Seed a deck from a file and do real Reviews during your
+waits: see the question, reveal the answer, rate your recall. Every rating is persisted and the
+card is rescheduled by FSRS. Honest due-vs-new selection and a stats pane arrive in M3. See
+[`docs/milestones/`](./docs/milestones/README.md).
 
 ## Install
 
@@ -62,6 +63,26 @@ JSON on stdin and decides for itself:
 If you would rather be explicit than let the adapter infer, `learnwhile hook --open` and
 `learnwhile hook --close` force the transition regardless of the event name.
 
+## Seed a deck
+
+Cards come from a tab-separated file, one card per line: the front, a tab, then the back.
+
+```
+What does FSRS stand for?	Free Spaced Repetition Scheduler
+Capital of France	Paris
+```
+
+Load it into your deck:
+
+```sh
+learnwhile seed cards.tsv
+```
+
+Re-running is safe. A card already in your deck is skipped, so you can edit the file and seed
+again without duplicating anything. This is a convenience for trying LearnWhile, not an
+Anki-style importer, so it takes TSV and nothing else. The database lives under your XDG data
+directory (`$XDG_DATA_HOME/learnwhile/`, or `~/.local/share/learnwhile/`).
+
 ## Run
 
 ```sh
@@ -72,7 +93,9 @@ Put it in a pane beside your agent — a tmux or Zellij split, or a second termi
 does not arrange your layout for you; that is your environment, not its business
 ([ADR-0003](./docs/adr/0003-long-lived-host-thin-adapters.md)).
 
-Press `q` to quit.
+When a card appears, press space to reveal the answer, then rate your recall: `1` Again, `2`
+Hard, `3` Good, `4` Easy. The available keys are always shown along the bottom of the pane. Your
+rating is saved the instant you press it and the card is rescheduled by FSRS. Press `q` to quit.
 
 ## What happens if it is not running
 
@@ -112,8 +135,9 @@ the open-Trigger set or the event loop directly.
 當你把工作交給代理時，卡片會出現在旁邊的窗格裡；當代理需要你回來時，卡片就會清掉。這個窗格
 永遠不會搶走焦點，也永遠不會擋住你：如果 LearnWhile 沒有在執行，你的代理行為就和平常完全一樣。
 
-**目前狀態：M1 — 觸發骨幹（Trigger spine）。** 觸發（Trigger）、窗格與 fail-open 都已經可以
-端到端運作。卡片目前是寫死的佔位內容；真正的卡片、FSRS 排程與資料持久化會在 M2 與 M3 完成。
+**目前狀態：M2 — 卡片與複習（cards and reviews）。** 你可以從檔案匯入一副牌，並在等待的空檔
+做真正的複習（Review）：看題目、翻答案、為自己的記憶評分。每一次評分都會被持久化，卡片也會
+由 FSRS 重新排程。誠實的「到期 vs 新卡」選卡邏輯與統計窗格會在 M3 完成。
 詳見 [`docs/milestones/`](./docs/milestones/README.md)。
 
 ## 安裝
@@ -166,6 +190,25 @@ cargo build --release
 如果你寧可明確指定、而不想讓轉接器自己推斷，可以用 `learnwhile hook --open` 和
 `learnwhile hook --close` 強制指定要送出的轉換，忽略事件名稱。
 
+## 匯入一副牌
+
+卡片來自一個以 tab 分隔的檔案，每行一張卡：正面、一個 tab，然後是背面。
+
+```
+What does FSRS stand for?	Free Spaced Repetition Scheduler
+Capital of France	Paris
+```
+
+把它匯入你的牌組：
+
+```sh
+learnwhile seed cards.tsv
+```
+
+重複執行是安全的。已經在牌組裡的卡片會被略過，所以你可以修改檔案後再次匯入，不會產生重複。
+這只是讓你方便試用 LearnWhile 的功能，並不是 Anki 那種匯入器，因此它只吃 TSV、不吃其他格式。
+資料庫存放在你的 XDG 資料目錄底下（`$XDG_DATA_HOME/learnwhile/`，或 `~/.local/share/learnwhile/`）。
+
 ## 執行
 
 ```sh
@@ -176,7 +219,9 @@ learnwhile          # 或：learnwhile host
 不會替你安排版面配置；那是你的環境，不是它該插手的事
 （[ADR-0003](./docs/adr/0003-long-lived-host-thin-adapters.md)）。
 
-按 `q` 離開。
+當卡片出現時，按空白鍵（space）翻出答案，接著為自己的記憶評分：`1` Again、`2` Hard、`3` Good、
+`4` Easy。可用的按鍵一直顯示在窗格底部。你一按下評分，結果就會立刻儲存，卡片也會由 FSRS
+重新排程。按 `q` 離開。
 
 ## 如果它沒有在執行會怎樣
 
