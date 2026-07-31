@@ -68,26 +68,50 @@ pub fn spawn_test_host() -> TestHost {
     fresh(
         Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS),
         &[(PLACEHOLDER_CARD_FRONT, PLACEHOLDER_CARD_BACK)],
+        None,
     )
 }
 
 pub fn spawn_test_host_with_expiry(expiry: Duration) -> TestHost {
-    fresh(expiry, &[(PLACEHOLDER_CARD_FRONT, PLACEHOLDER_CARD_BACK)])
+    fresh(
+        expiry,
+        &[(PLACEHOLDER_CARD_FRONT, PLACEHOLDER_CARD_BACK)],
+        None,
+    )
 }
 
 /// Boot with a caller-supplied deck, for tests that need more than the default card.
 pub fn spawn_test_host_with_cards(cards: &[(&str, &str)]) -> TestHost {
-    fresh(Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS), cards)
+    fresh(
+        Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS),
+        cards,
+        None,
+    )
+}
+
+/// Boot with a caller-supplied deck and daily new-card cap, for the scheduling tests.
+pub fn spawn_test_host_with_cap_and_cards(cap: i64, cards: &[(&str, &str)]) -> TestHost {
+    fresh(
+        Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS),
+        cards,
+        Some(cap),
+    )
 }
 
 /// Boot over a brand-new temp data directory and database.
-fn fresh(expiry: Duration, cards: &[(&str, &str)]) -> TestHost {
+fn fresh(expiry: Duration, cards: &[(&str, &str)], cap: Option<i64>) -> TestHost {
     let dir = tempfile::tempdir().expect("temp dir");
     let db_path = dir.path().join("learnwhile.db");
-    boot(dir, db_path, expiry, cards)
+    boot(dir, db_path, expiry, cards, cap)
 }
 
-fn boot(dir: TempDir, db_path: PathBuf, expiry: Duration, cards: &[(&str, &str)]) -> TestHost {
+fn boot(
+    dir: TempDir,
+    db_path: PathBuf,
+    expiry: Duration,
+    cards: &[(&str, &str)],
+    cap: Option<i64>,
+) -> TestHost {
     // A fresh socket name per boot: a restarted host cannot rebind the previous socket, since the
     // old listener thread lives on (the real binary would have exited and freed it). The database
     // is what persists across a restart, not the socket.
@@ -108,6 +132,11 @@ fn boot(dir: TempDir, db_path: PathBuf, expiry: Duration, cards: &[(&str, &str)]
             })
             .collect();
         storage.seed_cards(&new_cards, test_epoch()).expect("seed");
+    }
+    if let Some(cap) = cap {
+        storage
+            .set_config("new_cards_per_day", &cap.to_string())
+            .expect("set cap");
     }
     let learning = Learning::new(storage, clock.clone()).expect("learning");
 
@@ -279,10 +308,11 @@ impl TestHost {
             handle.join().expect("host thread");
         }
         // Reopen the same database in the same temp directory. Capture what boot needs before
-        // moving the TempDir out (which keeps it, and the database inside it, alive).
+        // moving the TempDir out (which keeps it, and the database inside it, alive). No reseeding
+        // and no cap override: the cards, history, and config already persisted are what matter.
         let db_path = self.db_path.clone();
         let expiry = self.expiry;
-        boot(self._dir, db_path, expiry, &[])
+        boot(self._dir, db_path, expiry, &[], None)
     }
 
     /// Quit the host and wait for the loop to finish.

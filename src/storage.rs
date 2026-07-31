@@ -208,6 +208,17 @@ impl Storage {
             .with_context(|| format!("config key {key:?} holds non-number {raw:?}"))
     }
 
+    /// Set a config value, inserting or replacing the row. Keeps config writes in the SQL module;
+    /// used by tests that need a non-default cap.
+    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO config (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
     /// Insert each card into the default deck, skipping any whose content hash already exists, so
     /// re-running `seed` on the same file is idempotent (spec §Card seeding). All inserts share one
     /// transaction and one `created_at`. New cards carry no FSRS state: `state` defaults to `new`
