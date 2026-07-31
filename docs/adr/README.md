@@ -21,6 +21,7 @@ Vocabulary follows the glossary in [`/CONTEXT.md`](../../CONTEXT.md).
 | [0008](./0008-single-binary-subcommands.md) | One binary is both the long-lived host and the hook client |
 | [0009](./0009-single-event-loop-producer-threads.md) | The host is one event loop fed by producer threads; no async runtime |
 | [0010](./0010-lapsed-cards-requeue-within-session.md) | A lapsed card returns within the same Session; the ban on pulling forward holds across them |
+| [0011](./0011-session-is-host-process-lifetime.md) | A Session is the lifetime of the host process |
 
 ## How they relate
 
@@ -31,6 +32,8 @@ record alone can overstate what was settled at the time:
   defers the message format → **0007** defines the frames.
 - **0005** flags that a lost Trigger close must be tolerated without saying how → **0006**
   sets the expiry policy.
+- **0010** makes the lapse queue die "with the Session" without saying what bounds a Session →
+  **0011** defines a Session as the host process lifetime.
 - **0003** establishes thin adapters without saying how one ships → **0008** makes the
   adapter a subcommand of the host binary.
 - **0004**, **0006** and the Review flow each introduce an input the host must handle, without
