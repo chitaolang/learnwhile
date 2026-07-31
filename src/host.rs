@@ -24,7 +24,9 @@ use crate::triggers::OpenTriggers;
 /// developer is still waiting, which self-corrects on the next Trigger, whereas expiring late
 /// pins a stale card up forever.
 ///
-/// M2 moves this into the `config` table, which is where ADR-0006 requires it to live.
+/// The host no longer reads this: as of M2 it reads `trigger_expiry_seconds` from the `config`
+/// table, which is where ADR-0006 requires the value to live. This constant is the compile-time
+/// twin of the `1800` the storage migration seeds, kept as the default the test harness injects.
 pub const DEFAULT_TRIGGER_EXPIRY_SECONDS: i64 = 1800;
 
 /// The hardcoded card M1 renders. Deliberate scaffolding: M2 replaces it with a real card from

@@ -18,9 +18,10 @@ use crossterm::terminal::{
 use learnwhile::clock::SystemClock;
 use learnwhile::event::Event;
 use learnwhile::frame::FrameType;
-use learnwhile::host::{DEFAULT_TRIGGER_EXPIRY_SECONDS, Host};
+use learnwhile::host::Host;
 use learnwhile::listener;
 use learnwhile::socket::default_socket_path;
+use learnwhile::storage::{Storage, default_db_path};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
@@ -74,6 +75,13 @@ fn run_hook(rest: &[String]) {
 }
 
 fn run_host() -> Result<()> {
+    // Open storage first, before the terminal is put into raw mode and the alternate screen: a
+    // migration or config error is then reported on a normal terminal rather than from behind the
+    // TUI. The expiry now lives in `config` (ADR-0006); M1's hardcoded 1800 is gone. Later M2
+    // steps hand this same handle to the Learning engine — for now only the expiry is read.
+    let storage = Storage::open(&default_db_path())?;
+    let expiry = Duration::seconds(storage.config_i64("trigger_expiry_seconds")?);
+
     let socket_path = default_socket_path();
     let listener = listener::bind(&socket_path)?;
 
@@ -84,11 +92,7 @@ fn run_host() -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let host = Host::new(
-        terminal,
-        Arc::new(SystemClock),
-        Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS),
-    );
+    let host = Host::new(terminal, Arc::new(SystemClock), expiry);
     let result = host.run(rx);
 
     // Restore the terminal before reporting, so an error is readable rather than drawn over the
