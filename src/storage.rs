@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 const DB_NAME: &str = "learnwhile.db";
 
@@ -90,6 +90,20 @@ pub struct NewCard {
 pub struct SeedOutcome {
     pub added: usize,
     pub skipped: usize,
+}
+
+/// A card read from storage, with enough state to conduct and persist a Review. `stability` and
+/// `difficulty` are `None` for a card not yet reviewed; `last_reviewed_at` is `None` until its
+/// first Review and is what the elapsed-days calculation reads.
+pub struct Card {
+    pub id: i64,
+    pub front: String,
+    pub back: String,
+    pub stability: Option<f32>,
+    pub difficulty: Option<f32>,
+    pub reps: i64,
+    pub lapses: i64,
+    pub last_reviewed_at: Option<DateTime<Utc>>,
 }
 
 pub struct Storage {
@@ -213,6 +227,43 @@ impl Storage {
             .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))?;
         Ok(count)
     }
+
+    /// The first card never yet reviewed (`state = 'new'`), or `None` if the deck holds none. This
+    /// is the data behind M2's placeholder `select_next`: rating a card flips it to `'review'`, so
+    /// repeated calls walk the new cards and then return `None`. M3 replaces this with the honest
+    /// due-then-new selection order (ADR-0002).
+    pub fn unreviewed_card(&self) -> Result<Option<Card>> {
+        let card = self
+            .conn
+            .query_row(
+                "SELECT id, front, back, stability, difficulty, reps, lapses, last_reviewed_at
+                 FROM cards WHERE state = 'new' ORDER BY id LIMIT 1",
+                [],
+                row_to_card,
+            )
+            .optional()?;
+        Ok(card)
+    }
+}
+
+/// Map a `cards` row onto a [`Card`]. A stored `last_reviewed_at` that fails to parse is treated as
+/// absent, degrading to a first-Review rather than failing the read.
+fn row_to_card(row: &rusqlite::Row) -> rusqlite::Result<Card> {
+    let last_reviewed_at: Option<String> = row.get("last_reviewed_at")?;
+    Ok(Card {
+        id: row.get("id")?,
+        front: row.get("front")?,
+        back: row.get("back")?,
+        stability: row.get("stability")?,
+        difficulty: row.get("difficulty")?,
+        reps: row.get("reps")?,
+        lapses: row.get("lapses")?,
+        last_reviewed_at: last_reviewed_at.and_then(|raw| {
+            DateTime::parse_from_rfc3339(&raw)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
+    })
 }
 
 /// A stable 64-bit FNV-1a hash of a card's content, as hex. Chosen over a crypto hash because the
@@ -297,6 +348,32 @@ mod tests {
         assert_eq!((second.added, second.skipped), (0, 2));
 
         assert_eq!(storage.card_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn unreviewed_card_returns_a_new_card_and_none_on_an_empty_deck() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+
+        // Empty deck: nothing to select.
+        assert!(storage.unreviewed_card().unwrap().is_none());
+
+        storage
+            .seed_cards(
+                &[NewCard {
+                    front: "front".into(),
+                    back: "back".into(),
+                }],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        let card = storage.unreviewed_card().unwrap().expect("a new card");
+        assert_eq!(card.front, "front");
+        assert_eq!(card.back, "back");
+        // A freshly seeded card carries no FSRS state yet.
+        assert!(card.stability.is_none());
+        assert!(card.last_reviewed_at.is_none());
     }
 
     #[test]
