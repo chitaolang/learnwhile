@@ -12,6 +12,7 @@ pub mod host;
 pub mod listener;
 pub mod renderer;
 pub mod socket;
+pub mod storage;
 pub mod triggers;
 
 #[cfg(feature = "testing")]

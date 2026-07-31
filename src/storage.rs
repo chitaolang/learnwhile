@@ -1,0 +1,219 @@
+//! Storage: the only module that issues SQL (spec §Modules).
+//!
+//! One `rusqlite` connection, the bundled SQLite (no dependency on the user having
+//! `libsqlite3`), and one migration run against `PRAGMA user_version` on host startup. The host
+//! is the sole owner of this file (ADR-0003); nothing else opens it for writing.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+
+const DB_NAME: &str = "learnwhile.db";
+
+/// The one migration. Bumped whenever the schema changes; `migrate` runs every version strictly
+/// greater than the database's current `user_version`.
+const SCHEMA_VERSION: i64 = 1;
+
+/// The v1 schema and its seed data (spec §Schema). Tables per DESIGN_DRAFT §9. `decks` and the
+/// `new`/`review` domain of `cards.state` both exist so post-v1 states need no migration.
+///
+/// Timestamps are RFC3339 text; FSRS quantities are `REAL`. `stability`, `difficulty`, `due`, and
+/// `last_reviewed_at` are nullable because a brand-new card has no memory state and no due date
+/// until its first Review.
+const MIGRATION_V1: &str = "\
+CREATE TABLE decks (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE cards (
+    id               INTEGER PRIMARY KEY,
+    deck_id          INTEGER NOT NULL REFERENCES decks(id),
+    front            TEXT NOT NULL,
+    back             TEXT NOT NULL,
+    content_hash     TEXT NOT NULL UNIQUE,
+    state            TEXT NOT NULL DEFAULT 'new',
+    stability        REAL,
+    difficulty       REAL,
+    due              TEXT,
+    reps             INTEGER NOT NULL DEFAULT 0,
+    lapses           INTEGER NOT NULL DEFAULT 0,
+    last_reviewed_at TEXT,
+    created_at       TEXT NOT NULL
+);
+
+CREATE TABLE review_history (
+    id                INTEGER PRIMARY KEY,
+    card_id           INTEGER NOT NULL REFERENCES cards(id),
+    session_id        TEXT NOT NULL,
+    reviewed_at       TEXT NOT NULL,
+    rating            INTEGER NOT NULL,
+    stability_before  REAL,
+    difficulty_before REAL,
+    stability_after   REAL NOT NULL,
+    difficulty_after  REAL NOT NULL,
+    elapsed_days      INTEGER NOT NULL,
+    scheduled_days    REAL NOT NULL
+);
+
+INSERT INTO decks (id, name) VALUES (1, 'Default');
+
+INSERT INTO config (key, value) VALUES
+    ('trigger_expiry_seconds', '1800'),
+    ('desired_retention', '0.9'),
+    ('new_cards_per_day', '20');
+";
+
+/// The `config` table is created outside `MIGRATION_V1` so the seed `INSERT` above can rely on it
+/// existing; keeping it as its own statement also makes the key/value shape obvious.
+const CREATE_CONFIG: &str = "\
+CREATE TABLE config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+";
+
+/// The default deck every v1 card belongs to. v1 has exactly one deck (spec §Schema).
+pub const DEFAULT_DECK_ID: i64 = 1;
+
+pub struct Storage {
+    conn: Connection,
+}
+
+impl Storage {
+    /// Open (creating if absent) the database at `path`, run migrations, and return a handle.
+    ///
+    /// Tests inject a temp path here, exactly as they inject a temp socket path; the host uses
+    /// [`default_db_path`].
+    pub fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating data directory {}", parent.display()))?;
+        }
+        let conn = Connection::open(path)
+            .with_context(|| format!("opening database {}", path.display()))?;
+        // Enforce the foreign keys declared in the schema; SQLite leaves them off by default.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let mut storage = Self { conn };
+        storage.migrate()?;
+        Ok(storage)
+    }
+
+    /// Run every migration newer than the database's `user_version`, in one transaction, then
+    /// stamp the new version. Idempotent: a database already at `SCHEMA_VERSION` does nothing.
+    fn migrate(&mut self) -> Result<()> {
+        let version: i64 = self
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version < 1 {
+            let tx = self.conn.transaction()?;
+            tx.execute_batch(CREATE_CONFIG)?;
+            tx.execute_batch(MIGRATION_V1)?;
+            tx.commit()?;
+        }
+        // `user_version` is a header write, not a bound parameter, so it cannot be prepared.
+        self.conn
+            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    /// A config value as text, or `None` if the key is absent.
+    pub fn config_str(&self, key: &str) -> Result<Option<String>> {
+        let value = self
+            .conn
+            .query_row("SELECT value FROM config WHERE key = ?1", [key], |row| {
+                row.get::<_, String>(0)
+            })
+            .map(Some)
+            .or_else(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        Ok(value)
+    }
+
+    /// A config value parsed as `i64`. Errors if the key is missing or the stored text is not an
+    /// integer, since a malformed config row is a real problem rather than something to paper over.
+    pub fn config_i64(&self, key: &str) -> Result<i64> {
+        let raw = self
+            .config_str(key)?
+            .with_context(|| format!("config key {key:?} is missing"))?;
+        raw.trim()
+            .parse::<i64>()
+            .with_context(|| format!("config key {key:?} holds non-integer {raw:?}"))
+    }
+
+    /// A config value parsed as `f64` (used for `desired_retention`).
+    pub fn config_f64(&self, key: &str) -> Result<f64> {
+        let raw = self
+            .config_str(key)?
+            .with_context(|| format!("config key {key:?} is missing"))?;
+        raw.trim()
+            .parse::<f64>()
+            .with_context(|| format!("config key {key:?} holds non-number {raw:?}"))
+    }
+}
+
+/// `$XDG_DATA_HOME/learnwhile/learnwhile.db`, falling back to `$HOME/.local/share/...` when the
+/// variable is unset — the XDG Base Directory default. Hand-rolled to match [`crate::socket`]
+/// rather than pulling in a directories crate for one path.
+pub fn default_db_path() -> PathBuf {
+    let base = match std::env::var_os("XDG_DATA_HOME") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => match std::env::var_os("HOME") {
+            Some(home) if !home.is_empty() => PathBuf::from(home).join(".local").join("share"),
+            _ => std::env::temp_dir(),
+        },
+    };
+    base.join("learnwhile").join(DB_NAME)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_creates_schema_and_seeds_defaults() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(DB_NAME);
+
+        let storage = Storage::open(&path).expect("open");
+
+        assert_eq!(storage.config_i64("trigger_expiry_seconds").unwrap(), 1800);
+        assert_eq!(storage.config_f64("desired_retention").unwrap(), 0.9);
+        assert_eq!(storage.config_i64("new_cards_per_day").unwrap(), 20);
+
+        let deck_name: String = storage
+            .conn
+            .query_row(
+                "SELECT name FROM decks WHERE id = ?1",
+                [DEFAULT_DECK_ID],
+                |r| r.get(0),
+            )
+            .expect("default deck");
+        assert_eq!(deck_name, "Default");
+    }
+
+    #[test]
+    fn migration_is_idempotent_on_an_existing_database() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(DB_NAME);
+
+        // First open migrates from empty; second open re-runs against a populated database.
+        Storage::open(&path).expect("first open");
+        let storage = Storage::open(&path).expect("second open");
+
+        // The seed did not run twice: exactly one deck and one row per config key.
+        let decks: i64 = storage
+            .conn
+            .query_row("SELECT COUNT(*) FROM decks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(decks, 1);
+        let configs: i64 = storage
+            .conn
+            .query_row("SELECT COUNT(*) FROM config", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(configs, 3);
+    }
+}
