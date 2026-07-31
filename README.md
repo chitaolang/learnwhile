@@ -7,9 +7,11 @@ When you hand work to your agent, a card appears in a pane beside it. When the a
 back, the card clears. The pane never steals focus, and nothing is ever blocked: if LearnWhile
 is not running, your agent behaves exactly as it always has.
 
-**Status: M2 — cards and reviews.** Seed a deck from a file and do real Reviews during your
+**Status: M3 — honest scheduling.** Seed a deck from a file and do real Reviews during your
 waits: see the question, reveal the answer, rate your recall. Every rating is persisted and the
-card is rescheduled by FSRS. Honest due-vs-new selection and a stats pane arrive in M3. See
+card is rescheduled by FSRS. The pane shows a genuinely due card, else a new card within the day's
+cap, else an idle state with due and new counts, and never pulls a card forward ahead of its due
+date. Session continuity and same-day re-attempts of failed cards arrive in M4. See
 [`docs/milestones/`](./docs/milestones/README.md).
 
 ## Install
@@ -135,10 +137,11 @@ the open-Trigger set or the event loop directly.
 當你把工作交給代理時，卡片會出現在旁邊的窗格裡；當代理需要你回來時，卡片就會清掉。這個窗格
 永遠不會搶走焦點，也永遠不會擋住你：如果 LearnWhile 沒有在執行，你的代理行為就和平常完全一樣。
 
-**目前狀態：M2 — 卡片與複習（cards and reviews）。** 你可以從檔案匯入一副牌，並在等待的空檔
+**目前狀態：M3 — 誠實排程（honest scheduling）。** 你可以從檔案匯入一副牌，並在等待的空檔
 做真正的複習（Review）：看題目、翻答案、為自己的記憶評分。每一次評分都會被持久化，卡片也會
-由 FSRS 重新排程。誠實的「到期 vs 新卡」選卡邏輯與統計窗格會在 M3 完成。
-詳見 [`docs/milestones/`](./docs/milestones/README.md)。
+由 FSRS 重新排程。窗格會顯示真正到期的卡片，否則是在當日上限內的新卡，再否則是帶有到期數與
+新卡數的閒置狀態，而且永遠不會把卡片提前到它的到期日之前。Session 連續性與對失敗卡片的當日
+重試會在 M4 完成。詳見 [`docs/milestones/`](./docs/milestones/README.md)。
 
 ## 安裝
 
