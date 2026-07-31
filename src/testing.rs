@@ -1,12 +1,12 @@
 //! `spawn_test_host` — the harness the rest of the project tests through.
 //!
-//! One seam: the host boundary. Tests boot the host in-process with a temp socket path and a
-//! controllable clock, then drive it by dialing the **real unix socket** and writing the **same
-//! frames the hook writes**. Key events go in on the same channel the real input thread uses
-//! (ADR-0009), so no test needs a terminal.
+//! One seam: the host boundary. Tests boot the host in-process with a temp socket path, a temp
+//! database, and a controllable clock, then drive it by dialing the **real unix socket** and
+//! writing the **same frames the hook writes**. Key events go in on the same channel the real input
+//! thread uses (ADR-0009), so no test needs a terminal.
 //!
-//! Tests assert on what the developer could observe — the pane's contents — and never reach into
-//! the open-Trigger set.
+//! Tests assert on what the developer could observe — the pane's contents and what persisted — and
+//! never reach into the open-Trigger set or the Review state machine.
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -28,11 +28,18 @@ use crate::clock::TestClock;
 use crate::event::Event;
 use crate::frame::{FrameType, TriggerFrame};
 use crate::host::{DEFAULT_TRIGGER_EXPIRY_SECONDS, Host};
+use crate::learning::Learning;
 use crate::listener;
+use crate::storage::{NewCard, Storage};
 
 /// How long a `wait_for` will poll before failing the test. Generous: it bounds a genuine
 /// deadlock, not a slow machine.
 const WAIT_TIMEOUT: StdDuration = StdDuration::from_secs(5);
+
+/// The card the harness seeds by default. Spine tests use its front as the stable "a card is up"
+/// marker, and the front/back are distinct enough to prove the answer stays hidden until reveal.
+pub const PLACEHOLDER_CARD_FRONT: &str = "What does FSRS stand for?";
+pub const PLACEHOLDER_CARD_BACK: &str = "Free Spaced Repetition Scheduler";
 
 /// A fixed, arbitrary instant. Tests advance from here explicitly; nothing depends on the real
 /// clock.
@@ -43,29 +50,67 @@ pub fn test_epoch() -> DateTime<Utc> {
 pub struct TestHost {
     pub clock: Arc<TestClock>,
     socket_path: PathBuf,
+    db_path: PathBuf,
+    expiry: Duration,
     tx: Sender<Event>,
     pane: Arc<Mutex<String>>,
     /// Incremented once per draw, and the host draws once per event it processes.
     ///
-    /// This is how a test knows a frame has actually been *applied* rather than merely written.
-    /// Frames reach the loop through a connection thread, so without it a test that writes a
-    /// frame and then advances the clock is racing its own setup — the frame can land on the
-    /// far side of the advance and be stamped with the wrong open time.
+    /// This is how a test knows an event has actually been *applied* rather than merely sent.
     draws: Arc<AtomicU64>,
     host_thread: Option<JoinHandle<()>>,
     _dir: TempDir,
 }
 
-/// Boot a host with a temp socket, a controllable clock, and an in-memory terminal.
+/// Boot a host over a fresh temp database, a controllable clock, and an in-memory terminal, seeding
+/// `cards` (front, back) into the deck first.
 pub fn spawn_test_host() -> TestHost {
-    spawn_test_host_with_expiry(Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS))
+    fresh(
+        Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS),
+        &[(PLACEHOLDER_CARD_FRONT, PLACEHOLDER_CARD_BACK)],
+    )
 }
 
 pub fn spawn_test_host_with_expiry(expiry: Duration) -> TestHost {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let socket_path = dir.path().join("learnwhile.sock");
+    fresh(expiry, &[(PLACEHOLDER_CARD_FRONT, PLACEHOLDER_CARD_BACK)])
+}
 
+/// Boot with a caller-supplied deck, for tests that need more than the default card.
+pub fn spawn_test_host_with_cards(cards: &[(&str, &str)]) -> TestHost {
+    fresh(Duration::seconds(DEFAULT_TRIGGER_EXPIRY_SECONDS), cards)
+}
+
+/// Boot over a brand-new temp data directory and database.
+fn fresh(expiry: Duration, cards: &[(&str, &str)]) -> TestHost {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("learnwhile.db");
+    boot(dir, db_path, expiry, cards)
+}
+
+fn boot(dir: TempDir, db_path: PathBuf, expiry: Duration, cards: &[(&str, &str)]) -> TestHost {
+    // A fresh socket name per boot: a restarted host cannot rebind the previous socket, since the
+    // old listener thread lives on (the real binary would have exited and freed it). The database
+    // is what persists across a restart, not the socket.
+    static SOCKET_SEQ: AtomicU64 = AtomicU64::new(0);
+    let socket_path = dir.path().join(format!(
+        "learnwhile-{}.sock",
+        SOCKET_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     let clock = TestClock::new(test_epoch());
+
+    let mut storage = Storage::open(&db_path).expect("open test db");
+    if !cards.is_empty() {
+        let new_cards: Vec<NewCard> = cards
+            .iter()
+            .map(|(front, back)| NewCard {
+                front: (*front).to_string(),
+                back: (*back).to_string(),
+            })
+            .collect();
+        storage.seed_cards(&new_cards, test_epoch()).expect("seed");
+    }
+    let learning = Learning::new(storage, clock.clone()).expect("learning");
+
     let (tx, rx) = channel();
 
     let listener = listener::bind(&socket_path).expect("bind test socket");
@@ -78,7 +123,7 @@ pub fn spawn_test_host_with_expiry(expiry: Duration) -> TestHost {
     let observer_draws = Arc::clone(&draws);
 
     let terminal = Terminal::new(TestBackend::new(60, 12)).expect("test terminal");
-    let host = Host::new(terminal, clock.clone(), expiry).with_draw_observer(Box::new(
+    let host = Host::new(terminal, clock.clone(), expiry, learning).with_draw_observer(Box::new(
         move |buffer: &Buffer| {
             *observer_pane.lock().expect("pane poisoned") = buffer_text(buffer);
             // Ordered after the pane write, so a test that sees the counter move sees the new
@@ -94,6 +139,8 @@ pub fn spawn_test_host_with_expiry(expiry: Duration) -> TestHost {
     TestHost {
         clock,
         socket_path,
+        db_path,
+        expiry,
         tx,
         pane,
         draws,
@@ -105,6 +152,11 @@ pub fn spawn_test_host_with_expiry(expiry: Duration) -> TestHost {
 impl TestHost {
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
+    }
+
+    /// The database this host is reading and writing, for direct SQLite assertions.
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
     }
 
     /// Write a frame over the real socket, exactly as the hook does, and return once the host has
@@ -140,6 +192,7 @@ impl TestHost {
         stream.flush().expect("flush frame");
     }
 
+    /// Inject a keypress without waiting. Used for quit, where the loop exits without drawing.
     pub fn key(&self, code: KeyCode) {
         self.tx
             .send(Event::Key(KeyEvent::new_with_kind(
@@ -148,6 +201,15 @@ impl TestHost {
                 KeyEventKind::Press,
             )))
             .expect("send key");
+    }
+
+    /// Inject a keypress and return once the host has drawn in response. Used for reveal and
+    /// ratings, where the test then inspects the pane or the database and must not race the loop —
+    /// a rating persists before the draw, so once this returns the row is committed.
+    pub fn press(&self, code: KeyCode) {
+        let before = self.draws.load(Ordering::Acquire);
+        self.key(code);
+        self.await_draw_after(before, "a key to be handled");
     }
 
     /// Fire the expiry sweep and return once it has run. Tests drive this directly rather than
@@ -207,6 +269,20 @@ impl TestHost {
             }
             sleep(StdDuration::from_millis(5));
         }
+    }
+
+    /// Quit the host and reboot a fresh one against the **same** database and socket, preserving
+    /// everything that persisted. This is how the restart-survival test reopens the temp database.
+    pub fn restart(mut self) -> TestHost {
+        self.key(KeyCode::Char('q'));
+        if let Some(handle) = self.host_thread.take() {
+            handle.join().expect("host thread");
+        }
+        // Reopen the same database in the same temp directory. Capture what boot needs before
+        // moving the TempDir out (which keeps it, and the database inside it, alive).
+        let db_path = self.db_path.clone();
+        let expiry = self.expiry;
+        boot(self._dir, db_path, expiry, &[])
     }
 
     /// Quit the host and wait for the loop to finish.

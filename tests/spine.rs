@@ -7,8 +7,7 @@
 
 use chrono::Duration;
 use crossterm::event::KeyCode;
-use learnwhile::host::PLACEHOLDER_CARD_FRONT;
-use learnwhile::testing::{spawn_test_host, spawn_test_host_with_expiry};
+use learnwhile::testing::{PLACEHOLDER_CARD_FRONT, spawn_test_host, spawn_test_host_with_expiry};
 
 const IDLE_MARKER: &str = "Not waiting";
 
