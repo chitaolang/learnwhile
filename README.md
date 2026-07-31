@@ -100,6 +100,24 @@ When a card appears, press space to reveal the answer, then rate your recall: `1
 Hard, `3` Good, `4` Easy. The available keys are always shown along the bottom of the pane. Your
 rating is saved the instant you press it and the card is rescheduled by FSRS. Press `q` to quit.
 
+## What the pane shows
+
+On each wait, LearnWhile picks what to show in a fixed order:
+
+1. A card you failed earlier in this sitting (rated Again), offered again for a second try.
+2. Otherwise, a card that is genuinely due.
+3. Otherwise, a new card — up to a daily limit, so a busy day never dumps the whole deck on you.
+4. Otherwise, an idle pane showing how many cards are due, how many new ones remain today, and
+   when the next card comes due.
+
+A card is never shown before its due date, so your FSRS intervals stay honest. The one exception
+is a card you just failed this sitting: it comes back the same day for a re-attempt and stops once
+you rate it anything other than Again.
+
+If the agent comes back while you are mid-review, the card is not lost. It is waiting in the same
+state — a revealed answer stays revealed — on your next wait. Ignoring a card costs nothing: there
+is no timer and no nagging. A sitting lasts as long as the host runs; restarting it starts fresh.
+
 ## What happens if it is not running
 
 Nothing. The hook connects to a socket that is not there, gives up instantly, and exits 0. A
@@ -253,6 +271,22 @@ learnwhile          # 或：learnwhile host
 當卡片出現時，按空白鍵（space）翻出答案，接著為自己的記憶評分：`1` Again、`2` Hard、`3` Good、
 `4` Easy。可用的按鍵一直顯示在窗格底部。你一按下評分，結果就會立刻儲存，卡片也會由 FSRS
 重新排程。按 `q` 離開。
+
+## 窗格會顯示什麼
+
+每一次等待，LearnWhile 會依固定順序挑選要顯示什麼：
+
+1. 你在這次 sitting 稍早失敗（評為 Again）的卡片，再給你一次重試的機會。
+2. 否則，一張真正到期的卡片。
+3. 否則，一張新卡 —— 但有每日上限，所以再忙的一天也不會把整副牌一次倒給你。
+4. 否則，一個閒置窗格，顯示有幾張到期、今天還剩幾張新卡，以及下一張卡片何時到期。
+
+卡片永遠不會在到期日之前出現，這樣你的 FSRS 間隔才會保持誠實。唯一的例外是你在這次 sitting
+剛剛失敗的卡片：它會在同一天回來讓你再試一次，直到你把它評為 Again 以外的評分為止。
+
+如果代理在你複習到一半時回來了，卡片不會遺失。它會保持原狀等著你 —— 已經翻開的答案仍然是
+翻開的 —— 在你下一次等待時繼續。忽略一張卡片不會有任何代價：沒有計時器，也不會一直催你。
+一次 sitting 會持續到 host 停止為止；重新啟動 host 就是重新開始。
 
 ## 如果它沒有在執行會怎樣
 
