@@ -90,6 +90,9 @@ where
                 Event::Tick => {
                     self.triggers.sweep(self.clock.now());
                 }
+                // A termination signal: leave the loop so `run_host` restores the terminal, exactly
+                // as the quit key does.
+                Event::Shutdown => return Ok(()),
                 Event::Key(key) => {
                     if is_quit(&key) {
                         return Ok(());

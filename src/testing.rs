@@ -322,6 +322,15 @@ impl TestHost {
             handle.join().expect("host thread");
         }
     }
+
+    /// End the host with a shutdown Event, exactly as the signal producer thread would on
+    /// SIGINT/SIGTERM, and wait for the loop to finish. Hangs if the loop does not honour it.
+    pub fn shutdown_via_signal(mut self) {
+        self.tx.send(Event::Shutdown).expect("send shutdown");
+        if let Some(handle) = self.host_thread.take() {
+            handle.join().expect("host thread");
+        }
+    }
 }
 
 /// Flatten a rendered buffer into text, one line per row.

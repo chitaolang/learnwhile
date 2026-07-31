@@ -15,4 +15,8 @@ pub enum Event {
     Key(KeyEvent),
     /// The expiry sweep's own timer (ADR-0006), never driven by frame arrival.
     Tick,
+    /// A termination signal (SIGINT/SIGTERM), translated by the signal producer thread. Handled
+    /// like the quit key so the loop returns through the terminal-restoring path (M5), rather than
+    /// the process being killed with the terminal still in raw mode.
+    Shutdown,
 }

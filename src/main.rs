@@ -151,6 +151,28 @@ fn spawn_producers(listener: std::os::unix::net::UnixListener, tx: Sender<Event>
         }
     });
 
+    // A fourth producer (ADR-0009): turn termination signals into a clean shutdown Event, so the
+    // main loop returns through the same terminal-restoring path as the quit key. Best-effort — if
+    // the handler cannot be installed, the tool still works, it just loses clean restore on signal.
+    match signal_hook::iterator::Signals::new([
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGTERM,
+    ]) {
+        Ok(mut signals) => {
+            let signal_tx = tx.clone();
+            std::thread::spawn(move || {
+                for _ in signals.forever() {
+                    if signal_tx.send(Event::Shutdown).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        Err(error) => {
+            tracing::error!(%error, "could not install the signal handler");
+        }
+    }
+
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(TICK_INTERVAL);

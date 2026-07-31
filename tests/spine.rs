@@ -218,6 +218,16 @@ fn quitting_ends_the_host_loop() {
 }
 
 #[test]
+fn a_shutdown_signal_ends_the_host_loop() {
+    let host = spawn_test_host();
+    host.wait_for(IDLE_MARKER);
+
+    // A SIGINT/SIGTERM reaches the loop as `Event::Shutdown`; the loop must return so the real host
+    // restores the terminal. Joins the loop, hanging if the signal is not honoured.
+    host.shutdown_via_signal();
+}
+
+#[test]
 fn escape_does_not_quit() {
     let host = spawn_test_host();
     host.wait_for(IDLE_MARKER);
