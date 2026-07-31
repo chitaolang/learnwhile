@@ -7,11 +7,12 @@ When you hand work to your agent, a card appears in a pane beside it. When the a
 back, the card clears. The pane never steals focus, and nothing is ever blocked: if LearnWhile
 is not running, your agent behaves exactly as it always has.
 
-**Status: M3 — honest scheduling.** Seed a deck from a file and do real Reviews during your
-waits: see the question, reveal the answer, rate your recall. Every rating is persisted and the
-card is rescheduled by FSRS. The pane shows a genuinely due card, else a new card within the day's
-cap, else an idle state with due and new counts, and never pulls a card forward ahead of its due
-date. Session continuity and same-day re-attempts of failed cards arrive in M4. See
+**Status: v1 feature-complete (M1–M5).** Seed a deck from a file and do real Reviews during your
+waits: question, reveal, rate. Every rating is persisted and the card rescheduled by FSRS, with
+genuinely due cards shown before new ones (never pulled forward), a daily new-card cap, an idle
+pane that shows what is due, mid-review resume across waits, and same-day re-attempts of failed
+cards within a sitting. A second host refuses to start, a killed host's stale socket is recovered
+on the next run, and diagnostics go to a rotating log file. See
 [`docs/milestones/`](./docs/milestones/README.md).
 
 ## Install
@@ -105,6 +106,32 @@ Nothing. The hook connects to a socket that is not there, gives up instantly, an
 crashed, wedged, or absent host cannot stall your agent — that is the property the fail-open
 tests exist to defend, and it is checked against the real binary rather than a mock.
 
+## Where things live, and resetting
+
+LearnWhile keeps three things under your XDG directories:
+
+| What | Where |
+|---|---|
+| Database (cards, review history) | `$XDG_DATA_HOME/learnwhile/learnwhile.db`, else `~/.local/share/learnwhile/` |
+| Log file (rotated daily) | `$XDG_STATE_HOME/learnwhile/host.log.<date>`, else `~/.local/state/learnwhile/` |
+| Socket | `$XDG_RUNTIME_DIR/learnwhile.sock`, else `/tmp/learnwhile.sock` |
+
+The host is the sole owner of the database and the socket
+([ADR-0003](./docs/adr/0003-long-lived-host-thin-adapters.md)). Starting a second host refuses
+with a message naming the running one, rather than two panes disagreeing. If a host is killed and
+leaves a stale socket behind, the next start recovers automatically, with no manual cleanup.
+
+When something misbehaves, the log is where to look: every discarded frame (with the reason) and
+any producer-thread failure is recorded there. The pane stays passive and silent by design
+([ADR-0001](./docs/adr/0001-agent-hook-trigger-passive-surface.md)), so the log carries the
+diagnostics rather than the screen.
+
+To reset your deck, stop the host and delete the database:
+
+```sh
+rm -f ~/.local/share/learnwhile/learnwhile.db   # or under $XDG_DATA_HOME
+```
+
 ## Development
 
 ```sh
@@ -137,11 +164,12 @@ the open-Trigger set or the event loop directly.
 當你把工作交給代理時，卡片會出現在旁邊的窗格裡；當代理需要你回來時，卡片就會清掉。這個窗格
 永遠不會搶走焦點，也永遠不會擋住你：如果 LearnWhile 沒有在執行，你的代理行為就和平常完全一樣。
 
-**目前狀態：M3 — 誠實排程（honest scheduling）。** 你可以從檔案匯入一副牌，並在等待的空檔
-做真正的複習（Review）：看題目、翻答案、為自己的記憶評分。每一次評分都會被持久化，卡片也會
-由 FSRS 重新排程。窗格會顯示真正到期的卡片，否則是在當日上限內的新卡，再否則是帶有到期數與
-新卡數的閒置狀態，而且永遠不會把卡片提前到它的到期日之前。Session 連續性與對失敗卡片的當日
-重試會在 M4 完成。詳見 [`docs/milestones/`](./docs/milestones/README.md)。
+**目前狀態：v1 功能完成（M1–M5）。** 你可以從檔案匯入一副牌，並在等待的空檔做真正的複習
+（Review）：看題目、翻答案、評分。每一次評分都會被持久化，卡片也會由 FSRS 重新排程；真正到期
+的卡片會排在新卡之前（永遠不會提前拉出來）、有每日新卡上限、有顯示到期狀況的閒置窗格、複習能
+跨多次等待接續，並且在同一次 sitting 內對失敗的卡片提供當日重試。第二個 host 會拒絕啟動，被
+強制關閉的 host 留下的 stale socket 會在下次啟動時自動回復，診斷訊息則寫入每日輪替的 log 檔。
+詳見 [`docs/milestones/`](./docs/milestones/README.md)。
 
 ## 安裝
 
@@ -231,6 +259,30 @@ learnwhile          # 或：learnwhile host
 不會怎樣。hook 會去連一個根本不存在的 socket，立刻放棄，然後以結束碼 0 收工。當掉、卡住或
 根本沒啟動的主機，都不可能拖慢你的代理 —— 這正是 fail-open 測試要守住的性質，而且驗證的對象
 是真正的執行檔，不是替身（mock）。
+
+## 東西放在哪裡，以及如何重置
+
+LearnWhile 在你的 XDG 目錄底下放三樣東西：
+
+| 是什麼 | 放在哪裡 |
+|---|---|
+| 資料庫（卡片、複習歷史） | `$XDG_DATA_HOME/learnwhile/learnwhile.db`，否則 `~/.local/share/learnwhile/` |
+| Log 檔（每日輪替） | `$XDG_STATE_HOME/learnwhile/host.log.<日期>`，否則 `~/.local/state/learnwhile/` |
+| Socket | `$XDG_RUNTIME_DIR/learnwhile.sock`，否則 `/tmp/learnwhile.sock` |
+
+Host 是資料庫與 socket 的唯一擁有者（[ADR-0003](./docs/adr/0003-long-lived-host-thin-adapters.md)）。
+啟動第二個 host 時，它會拒絕，並顯示一段指出正在執行中的那個 host 的訊息，而不是讓兩個窗格
+各說各話。如果某個 host 被強制關閉、留下了 stale socket，下次啟動會自動回復，不需要手動清理。
+
+當有東西出問題時，log 就是該去看的地方：每一個被丟棄的 frame（連同原因）以及任何 producer
+執行緒的失敗都會記在那裡。窗格刻意保持被動且安靜（[ADR-0001](./docs/adr/0001-agent-hook-trigger-passive-surface.md)），
+所以承載診斷訊息的是 log，而不是畫面。
+
+要重置你的牌組，先停掉 host，再刪掉資料庫：
+
+```sh
+rm -f ~/.local/share/learnwhile/learnwhile.db   # 或在 $XDG_DATA_HOME 底下
+```
 
 ## 開發
 
