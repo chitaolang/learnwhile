@@ -127,6 +127,17 @@ pub struct Card {
     pub due: Option<DateTime<Utc>>,
 }
 
+/// A card's display fields for the `cards` subcommand — enough to see what is in the deck and how
+/// it is scheduled, without the FSRS internals a Review needs.
+pub struct CardSummary {
+    pub id: i64,
+    pub front: String,
+    pub state: String,
+    pub due: Option<DateTime<Utc>>,
+    pub reps: i64,
+    pub lapses: i64,
+}
+
 pub struct Storage {
     conn: Connection,
 }
@@ -209,7 +220,7 @@ impl Storage {
     }
 
     /// Set a config value, inserting or replacing the row. Keeps config writes in the SQL module;
-    /// used by tests that need a non-default cap.
+    /// used by the `config set` subcommand and by tests that need a non-default cap.
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO config (key, value) VALUES (?1, ?2)
@@ -217,6 +228,17 @@ impl Storage {
             rusqlite::params![key, value],
         )?;
         Ok(())
+    }
+
+    /// Every config row as `(key, value)`, ordered by key, for the `config` subcommand.
+    pub fn all_config(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM config ORDER BY key")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     /// Insert each card into the default deck, skipping any whose content hash already exists, so
@@ -313,6 +335,27 @@ impl Storage {
             )
             .optional()?;
         Ok(card)
+    }
+
+    /// Every card's display summary, ordered by id, for the `cards` subcommand.
+    pub fn list_cards(&self) -> Result<Vec<CardSummary>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, front, state, due, reps, lapses FROM cards ORDER BY id")?;
+        let rows = stmt
+            .query_map([], |row| {
+                let due: Option<String> = row.get("due")?;
+                Ok(CardSummary {
+                    id: row.get("id")?,
+                    front: row.get("front")?,
+                    state: row.get("state")?,
+                    due: parse_timestamp(due),
+                    reps: row.get("reps")?,
+                    lapses: row.get("lapses")?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     /// How many new cards were introduced in the half-open window `[start, end)`, derived from
@@ -546,6 +589,52 @@ mod tests {
         assert!(card.stability.is_none());
         assert!(card.last_reviewed_at.is_none());
         assert!(card.due.is_none());
+    }
+
+    #[test]
+    fn all_config_lists_the_seeded_keys() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+
+        let config = storage.all_config().unwrap();
+        // Ordered by key, so this is stable to assert against.
+        assert_eq!(
+            config,
+            vec![
+                ("desired_retention".to_string(), "0.9".to_string()),
+                ("new_cards_per_day".to_string(), "20".to_string()),
+                ("trigger_expiry_seconds".to_string(), "1800".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_cards_returns_each_card_with_its_state() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut storage = Storage::open(&dir.path().join(DB_NAME)).expect("open");
+        assert!(storage.list_cards().unwrap().is_empty());
+
+        storage
+            .seed_cards(
+                &[
+                    NewCard {
+                        front: "a".into(),
+                        back: "1".into(),
+                    },
+                    NewCard {
+                        front: "b".into(),
+                        back: "2".into(),
+                    },
+                ],
+                Utc::now(),
+            )
+            .expect("seed");
+
+        let cards = storage.list_cards().unwrap();
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].front, "a");
+        assert_eq!(cards[0].state, "new");
+        assert!(cards[0].due.is_none());
     }
 
     #[test]

@@ -1,8 +1,8 @@
-//! One binary, two roles, selected by subcommand (ADR-0008).
+//! One binary in several roles, selected by subcommand (ADR-0008).
 //!
-//! Argument handling is a hand-rolled match rather than `clap`: there are three subcommands with
-//! no flags, and every millisecond of the `hook` path is paid by the developer on every prompt
-//! submission.
+//! Argument handling is a hand-rolled match rather than `clap`: the subcommands take no flags worth
+//! a parser, and every millisecond of the `hook` path is paid by the developer on every prompt
+//! submission, so it must stay cold — `clap` would put a parser on it.
 
 use std::io::stdout;
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use std::sync::mpsc::{Sender, channel};
 use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result};
-use chrono::{Duration, Utc};
+use chrono::{Duration, Local, Utc};
 use crossterm::ExecutableCommand;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -46,6 +46,18 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("config") => {
+            if let Err(error) = run_config(&args[1..]) {
+                eprintln!("learnwhile: {error:#}");
+                std::process::exit(1);
+            }
+        }
+        Some("cards") => {
+            if let Err(error) = run_cards() {
+                eprintln!("learnwhile: {error:#}");
+                std::process::exit(1);
+            }
+        }
         None | Some("host") => {
             if let Err(error) = run_host() {
                 eprintln!("learnwhile: {error:#}");
@@ -54,7 +66,7 @@ fn main() {
         }
         Some(other) => {
             eprintln!("learnwhile: unknown subcommand {other:?}");
-            eprintln!("usage: learnwhile [host|hook|seed]");
+            eprintln!("usage: learnwhile [host|hook|seed|config|cards]");
             std::process::exit(2);
         }
     }
@@ -199,6 +211,93 @@ fn run_seed(rest: &[String]) -> Result<()> {
         "{} added, {} skipped (already present)",
         outcome.added, outcome.skipped
     );
+    Ok(())
+}
+
+/// The `config` subcommand: `config` lists every key/value, `config set <key> <value>` changes one.
+/// Only keys that already exist can be set, so a typo errors rather than writing a row nothing
+/// reads; the value is validated for the known numeric keys so a bad value fails here, not at the
+/// next host startup.
+fn run_config(rest: &[String]) -> Result<()> {
+    let storage = Storage::open(&default_db_path())?;
+
+    match rest.first().map(String::as_str) {
+        None => {
+            for (key, value) in storage.all_config()? {
+                println!("{key} = {value}");
+            }
+        }
+        Some("set") => {
+            let key = rest
+                .get(1)
+                .context("usage: learnwhile config set <key> <value>")?;
+            let value = rest
+                .get(2)
+                .context("usage: learnwhile config set <key> <value>")?;
+            if storage.config_str(key)?.is_none() {
+                anyhow::bail!(
+                    "unknown config key {key:?}. Run `learnwhile config` to see the keys."
+                );
+            }
+            validate_config_value(key, value)?;
+            storage.set_config(key, value)?;
+            println!("{key} = {value}");
+        }
+        Some(other) => {
+            anyhow::bail!(
+                "unknown config action {other:?}. Use `config` to list or `config set <key> <value>`."
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Reject a value the host would choke on at startup. Covers exactly the seeded numeric keys; the
+/// `config set` path only reaches here for keys that already exist.
+fn validate_config_value(key: &str, value: &str) -> Result<()> {
+    match key {
+        "trigger_expiry_seconds" | "new_cards_per_day" => {
+            value
+                .parse::<i64>()
+                .with_context(|| format!("{key} must be a whole number, got {value:?}"))?;
+        }
+        "desired_retention" => {
+            let retention: f64 = value
+                .parse()
+                .with_context(|| format!("{key} must be a number, got {value:?}"))?;
+            if !(0.0 < retention && retention <= 1.0) {
+                anyhow::bail!("desired_retention must be between 0 and 1, got {value:?}");
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The `cards` subcommand: a table of every card and how it is scheduled.
+fn run_cards() -> Result<()> {
+    let storage = Storage::open(&default_db_path())?;
+    let cards = storage.list_cards()?;
+
+    if cards.is_empty() {
+        println!("no cards yet — seed a deck with `learnwhile seed <file.tsv>`");
+        return Ok(());
+    }
+
+    println!(
+        "{:>4}  {:<6}  {:<10}  {:>4}  {:>6}  front",
+        "id", "state", "due", "reps", "lapses"
+    );
+    for card in cards {
+        let due = card
+            .due
+            .map(|due| due.with_timezone(&Local).format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            "{:>4}  {:<6}  {:<10}  {:>4}  {:>6}  {}",
+            card.id, card.state, due, card.reps, card.lapses, card.front
+        );
+    }
     Ok(())
 }
 
