@@ -18,6 +18,15 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = "0.3.23"
 
+[profile.release]
+# Tuned for a locally-installed CLI: a well-optimized, stripped binary loads fast, and binary size
+# is explicitly not a concern (ADR-0008) — startup time is. `panic` stays the default `unwind`,
+# NOT `abort`: the hook path relies on `catch_unwind` to exit 0 on a panic (ADR-0004), which
+# `panic = "abort"` would break.
+lto = "thin"
+codegen-units = 1
+strip = true
+
 [features]
 # The `spawn_test_host` harness. Off by default so the shipped binary carries no test scaffolding;
 # enabled for integration tests via the self dev-dependency below.
