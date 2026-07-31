@@ -8,6 +8,7 @@
 //! A Review completes only once persisted, and persistence happens on the rating keypress, not on a
 //! later flush — a crash must not lose a rating (spec §Review flow).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -55,9 +56,12 @@ pub struct Learning {
     /// The daily cap on new-card introductions (ADR-0002), read from config. Left configurable and
     /// not tuned in M3: `20` is a guess to revisit once `review_history` holds real data.
     new_cards_per_day: i64,
-    /// Identifies this host run in `review_history.session_id`. v1 has no real Session lifecycle
-    /// (that is M4); a per-run id keeps the column populated until then.
+    /// Identifies this host run in `review_history.session_id`. The Session is the host process
+    /// lifetime (ADR-0011); this id ties every Review in the run to that Session.
     session_id: String,
+    /// Cards failed this Session, re-offered ahead of everything until rated other than Again
+    /// (ADR-0010). In-memory and Session-scoped: never persisted, discarded when the process exits.
+    lapse_queue: VecDeque<i64>,
     review: ReviewState,
 }
 
@@ -74,6 +78,7 @@ impl Learning {
             scheduler,
             new_cards_per_day,
             session_id,
+            lapse_queue: VecDeque::new(),
             review: ReviewState::Idle,
         })
     }
@@ -164,14 +169,29 @@ impl Learning {
             new_lapses: card.lapses + i64::from(rating == Rating::Again),
         })?;
 
+        // Lapse queue (ADR-0010): a card rated Again re-queues for a re-attempt this Session; any
+        // other rating removes it. Remove first either way, so a re-attempt rated Again moves to the
+        // back rather than duplicating. Session state only — never persisted.
+        self.lapse_queue.retain(|&id| id != card.id);
+        if rating == Rating::Again {
+            self.lapse_queue.push_back(card.id);
+        }
+
         Ok(())
     }
 
-    /// The honest selection order (ADR-0002), evaluated fresh on each surfacing: a genuinely due
-    /// card, else a new card while today's introductions are under the daily cap, else nothing (the
-    /// idle state). A not-yet-due card is never pulled forward. M4 adds the one bounded exception
-    /// (the lapse queue, ADR-0010); until then this order holds without exception.
+    /// The selection order: lapse → due → new → idle, evaluated fresh on each surfacing. The lapse
+    /// queue (ADR-0010) is the one Session-bounded exception to ADR-0002's ban on pulling a card
+    /// forward — a card failed this Session is re-offered ahead of everything, before it is due.
+    /// Everything after it is ADR-0002 unchanged: a genuinely due card, else a new card while
+    /// today's introductions are under the cap, else the idle state. Do not "fix" the lapse branch
+    /// back out: it is deliberate, bounded to the Session, and cited to ADR-0010.
     fn select_next(&self) -> Result<Option<Card>> {
+        if let Some(&card_id) = self.lapse_queue.front()
+            && let Some(card) = self.storage.card_by_id(card_id)?
+        {
+            return Ok(Some(card));
+        }
         let now = self.clock.now();
         if let Some(card) = self.storage.due_card(now)? {
             return Ok(Some(card));
@@ -471,6 +491,92 @@ mod tests {
         // Advance past q1's interval: it is now due.
         clock.advance(Duration::days(60));
         assert_eq!(learning.idle_stats().expect("stats").due_today, 1);
+    }
+
+    #[test]
+    fn a_card_rated_again_re_queues_ahead_of_a_new_card() {
+        let (mut learning, _clock, _path, _dir) = learning_with(&[("q1", "a1"), ("q2", "a2")]);
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Again).expect("rate");
+
+        // q1 is due tomorrow (clamped), so it is not due now — the lapse queue is the only thing
+        // that re-offers it, and it does so ahead of the new card q2.
+        learning.surface().expect("surface");
+        match learning.view() {
+            ReviewView::Question { front } => assert_eq!(front, "q1"),
+            _ => panic!("expected the lapsed card ahead of the new one"),
+        }
+    }
+
+    #[test]
+    fn a_lapsed_card_stops_returning_once_rated_good() {
+        let (mut learning, _clock, _path, _dir) = learning_with(&[("q1", "a1"), ("q2", "a2")]);
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Again).expect("rate");
+
+        // Re-attempt q1 and pass it: it leaves the queue.
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Good).expect("rate");
+
+        // The next card is the new q2, and q1 does not come back — re-attempts converge.
+        learning.surface().expect("surface");
+        match learning.view() {
+            ReviewView::Question { front } => assert_eq!(front, "q2"),
+            _ => panic!("expected the new card once the lapse converged"),
+        }
+    }
+
+    #[test]
+    fn a_re_attempt_is_an_ordinary_review_with_zero_elapsed_days() {
+        let (mut learning, _clock, path, _dir) = learning_with(&[("q1", "a1")]);
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Again).expect("rate"); // review 1
+
+        learning.surface().expect("surface"); // lapse re-offer
+        learning.reveal();
+        learning.rate(Rating::Good).expect("rate"); // review 2, same day
+
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM review_history", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 2,
+            "a Lapse and its re-attempt are both completed Reviews"
+        );
+        let last_elapsed: i64 = conn
+            .query_row(
+                "SELECT elapsed_days FROM review_history ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            last_elapsed, 0,
+            "an intra-Session re-attempt has zero elapsed days"
+        );
+    }
+
+    #[test]
+    fn the_lapse_queue_does_not_survive_a_new_session() {
+        let (mut learning, _clock, path, _dir) = learning_with(&[("q1", "a1"), ("q2", "a2")]);
+        learning.surface().expect("surface");
+        learning.reveal();
+        learning.rate(Rating::Again).expect("rate"); // q1 queued in this Session
+
+        // A fresh Learning over the same database, as a host restart would create, starts with an
+        // empty queue. q1 is due tomorrow, not now, so it is not re-offered; the new q2 is.
+        let storage = Storage::open(&path).expect("reopen");
+        let mut restarted = Learning::new(storage, TestClock::new(epoch())).expect("learning");
+        restarted.surface().expect("surface");
+        match restarted.view() {
+            ReviewView::Question { front } => assert_eq!(front, "q2"),
+            _ => panic!("the lapse queue must not survive a new Session"),
+        }
     }
 
     #[test]
