@@ -24,6 +24,9 @@ Vocabulary follows the glossary in [`/CONTEXT.md`](../../CONTEXT.md).
 | [0011](./0011-session-is-host-process-lifetime.md) | A Session is the lifetime of the host process |
 | [0012](./0012-furigana-is-inline-notation-rendered-at-draw-time.md) | Furigana is inline notation, parsed and rendered at draw time |
 | [0013](./0013-furigana-renders-on-the-answer-side-only.md) | Furigana renders on the answer side only |
+| [0014](./0014-prompt-gate-opt-in-fail-open.md) | The Prompt Gate is opt-in via a hook flag and fail-open |
+| [0015](./0015-gate-acts-on-outgoing-prompt-and-shows-owed-card-while-idle.md) | An active Prompt Gate acts on the outgoing prompt and shows the owed card while idle |
+| [0016](./0016-gate-makes-userpromptsubmit-request-response.md) | The Prompt Gate makes the UserPromptSubmit exchange request/response |
 
 ## How they relate
 
@@ -41,6 +44,11 @@ record alone can overstate what was settled at the time:
 - **0012** makes furigana an inline-notation rendering concern without saying *where* the
   reading shows → **0013** confines it to the answer side, extending ADR-0002's
   "don't pre-empt the review" from the scheduler to the reveal boundary.
+- **0014** opts the Prompt Gate in without saying how the developer, once blocked while idle,
+  can review → **0015** shows the owed card while idle so the debt is always payable. **0016**
+  carves the request/response the gate needs out of **0007**'s one-way frames, for that one
+  exchange only. All three are the deliberate, opt-in exceptions to **0001**'s passivity and
+  **0004**'s fail-open, never the default.
 - **0004**, **0006** and the Review flow each introduce an input the host must handle, without
   saying how they coexist → **0009** serialises all three onto one event loop.
 
