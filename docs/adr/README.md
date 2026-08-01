@@ -22,6 +22,8 @@ Vocabulary follows the glossary in [`/CONTEXT.md`](../../CONTEXT.md).
 | [0009](./0009-single-event-loop-producer-threads.md) | The host is one event loop fed by producer threads; no async runtime |
 | [0010](./0010-lapsed-cards-requeue-within-session.md) | A lapsed card returns within the same Session; the ban on pulling forward holds across them |
 | [0011](./0011-session-is-host-process-lifetime.md) | A Session is the lifetime of the host process |
+| [0012](./0012-furigana-is-inline-notation-rendered-at-draw-time.md) | Furigana is inline notation, parsed and rendered at draw time |
+| [0013](./0013-furigana-renders-on-the-answer-side-only.md) | Furigana renders on the answer side only |
 
 ## How they relate
 
@@ -36,6 +38,9 @@ record alone can overstate what was settled at the time:
   **0011** defines a Session as the host process lifetime.
 - **0003** establishes thin adapters without saying how one ships → **0008** makes the
   adapter a subcommand of the host binary.
+- **0012** makes furigana an inline-notation rendering concern without saying *where* the
+  reading shows → **0013** confines it to the answer side, extending ADR-0002's
+  "don't pre-empt the review" from the scheduler to the reveal boundary.
 - **0004**, **0006** and the Review flow each introduce an input the host must handle, without
   saying how they coexist → **0009** serialises all three onto one event loop.
 
