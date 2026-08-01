@@ -21,7 +21,7 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
+use ratatui::buffer::{Buffer, CellWidth};
 use tempfile::TempDir;
 
 use crate::clock::TestClock;
@@ -334,6 +334,12 @@ impl TestHost {
 }
 
 /// Flatten a rendered buffer into text, one line per row.
+///
+/// A wide grapheme (a CJK kanji/kana occupies two terminal columns) is stored in one cell, and the
+/// column it overhangs into is a shadow cell whose symbol is a space. The real backend skips that
+/// shadow when it writes to the terminal (`Buffer::diff` advances by each cell's display width), so
+/// the flattened text must skip it too — otherwise a Japanese front reads as "日 本 語" here while
+/// the terminal shows "日本語", and no test could assert on card content that contains kanji.
 pub fn buffer_text(buffer: &Buffer) -> String {
     let width = buffer.area.width as usize;
     if width == 0 {
@@ -343,11 +349,15 @@ pub fn buffer_text(buffer: &Buffer) -> String {
         .content
         .chunks(width)
         .map(|row| {
-            row.iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>()
-                .trim_end()
-                .to_string()
+            let mut line = String::new();
+            let mut shadow = 0u16;
+            for cell in row {
+                if shadow == 0 {
+                    line.push_str(cell.symbol());
+                }
+                shadow = shadow.max(cell.cell_width()).saturating_sub(1);
+            }
+            line.trim_end().to_string()
         })
         .collect::<Vec<_>>()
         .join("\n")
