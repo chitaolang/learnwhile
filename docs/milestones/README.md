@@ -25,6 +25,12 @@ work that can follow with confidence.
 | [M4](./M4-session-continuity.md) | Session continuity | Resume a Review interrupted by the agent, and re-attempt a card they failed |
 | [M5](./M5-hardening-and-install.md) | Hardening and install | Install it, run it every day, and diagnose it when it misbehaves |
 
+M1 through M5 are v1. The first post-v1 slice follows the same rule and format:
+
+| # | Milestone | What a developer can do at the end |
+|---|---|---|
+| [M6](./M6-furigana-display.md) | Furigana display | Author Japanese cards with readings and see furigana over the kanji on reveal |
+
 ## Reading a milestone
 
 Each file has the same shape:
