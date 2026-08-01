@@ -1,19 +1,24 @@
 //! The socket accept thread — one of the three producers feeding the event loop (ADR-0009).
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 
 use crate::event::Event;
-use crate::frame::{DiscardReason, MAX_LINE_BYTES, parse_line};
+use crate::frame::{DiscardReason, FrameType, MAX_LINE_BYTES, TriggerFrame, Verdict, parse_line};
 
 /// How long a connected client has to send its line before we give up on it. Bounds a client
 /// that connects and then says nothing, which would otherwise hold a connection thread forever.
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// How long to wait on the event loop for a gate verdict before failing open. Generous: the host
+/// answers a gate query almost immediately, so this only bounds a wedged loop, and a missed verdict
+/// becomes an `Allow` so the developer's prompt is never held by our own slowness (ADR-0004).
+const GATE_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Bind the socket, recovering a stale file and refusing a live one.
 ///
@@ -92,6 +97,13 @@ fn handle_connection(stream: UnixStream, tx: Sender<Event>) {
 
         match std::str::from_utf8(&line) {
             Ok(text) => match parse_line(text.trim_end_matches('\n')) {
+                // A gate query needs a verdict written back on this same connection (ADR-0016),
+                // so it does not go down the fire-and-forget `Event::Frame` path.
+                Ok(frame) if frame.frame_type == FrameType::GateQuery => {
+                    if !answer_gate_query(reader.get_mut(), &frame, &tx) {
+                        return;
+                    }
+                }
                 Ok(frame) => {
                     if tx.send(Event::Frame(frame)).is_err() {
                         // The host is gone; nothing left to serve.
@@ -103,6 +115,26 @@ fn handle_connection(stream: UnixStream, tx: Sender<Event>) {
             Err(_) => discard(DiscardReason::Unparseable),
         }
     }
+}
+
+/// Ask the event loop for a gate verdict and write it back on `stream`. Returns false when the host
+/// is gone, so the caller stops serving. A verdict that does not arrive in time is treated as
+/// `Allow`: our own slowness must never hold the developer's prompt (ADR-0004).
+fn answer_gate_query(stream: &mut UnixStream, frame: &TriggerFrame, tx: &Sender<Event>) -> bool {
+    let (reply_tx, reply_rx) = channel();
+    if tx
+        .send(Event::GateQuery {
+            key: frame.key(),
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return false;
+    }
+    let verdict = reply_rx
+        .recv_timeout(GATE_REPLY_TIMEOUT)
+        .unwrap_or(Verdict::Allow);
+    stream.write_all(verdict.to_line().as_bytes()).is_ok()
 }
 
 /// Drop a frame, recording why. ADR-0007 requires this log precisely because a silent discard

@@ -15,11 +15,23 @@ use ratatui::buffer::Buffer;
 
 use crate::clock::Clock;
 use crate::event::Event;
-use crate::frame::FrameType;
+use crate::frame::{FrameType, Verdict};
 use crate::learning::{Learning, ReviewView};
 use crate::renderer::{PaneState, draw};
 use crate::scheduler::Rating;
 use crate::triggers::{OpenTriggers, WaitingEdge};
+
+/// The Session-scoped review debt the Prompt Gate reads (spec §Review debt, ADR-0014). `None` at the
+/// start of a cycle, `Owed` once a card is surfaced and not yet rated, `Paid` once any rating lands.
+/// Only `Owed` blocks the next prompt, and a rating cannot re-arm it within a cycle, which keeps the
+/// gate to "one Review per handoff" rather than "clear the whole queue". Tracked whether or not a
+/// gate is active; read only when one is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Debt {
+    None,
+    Owed,
+    Paid,
+}
 
 /// The default Trigger expiry (ADR-0006), erring short: expiring early clears a card while the
 /// developer is still waiting, which self-corrects on the next Trigger, whereas expiring late
@@ -40,6 +52,11 @@ pub struct Host<B: Backend> {
     clock: Arc<dyn Clock>,
     learning: Learning,
     on_draw: Option<DrawObserver>,
+    /// Review debt for the Prompt Gate (M7).
+    debt: Debt,
+    /// Set the first time a gate query arrives this Session. Until then the idle pane never shows a
+    /// card, so a developer who never passes `--gate` sees v1 behaviour unchanged (ADR-0015).
+    gate_active: bool,
 }
 
 impl<B: Backend> Host<B>
@@ -58,6 +75,8 @@ where
             clock,
             learning,
             on_draw: None,
+            debt: Debt::None,
+            gate_active: false,
         }
     }
 
@@ -80,11 +99,33 @@ where
                     let edge = match frame.frame_type {
                         FrameType::TriggerOpen => self.triggers.open(frame.key(), now),
                         FrameType::TriggerClose => self.triggers.close(&frame.key()),
+                        // Gate queries reach the loop as `Event::GateQuery`, never here: the listener
+                        // routes them so it can write the verdict back on the connection.
+                        FrameType::GateQuery => WaitingEdge::Unchanged,
                     };
                     // The empty→non-empty edge is when a wait begins: surface a card into it. A
                     // Review already in flight is left untouched (spec §Review flow).
                     if edge == WaitingEdge::BecameWaiting {
                         self.learning.surface()?;
+                    }
+                    self.arm_debt_if_owed();
+                }
+                // A `--gate` hook asking whether a Review is owed before its prompt proceeds (M7).
+                Event::GateQuery { key, reply } => {
+                    self.gate_active = true;
+                    if self.debt == Debt::Owed {
+                        // Hold the prompt. The owed card is already shown while idle, so the
+                        // developer can clear it. The Trigger does not open: no handoff happened.
+                        let _ = reply.send(Verdict::Block);
+                    } else {
+                        let _ = reply.send(Verdict::Allow);
+                        // A new cycle: clear the debt, then open the Trigger exactly as a plain open.
+                        self.debt = Debt::None;
+                        let now = self.clock.now();
+                        if self.triggers.open(key, now) == WaitingEdge::BecameWaiting {
+                            self.learning.surface()?;
+                        }
+                        self.arm_debt_if_owed();
                     }
                 }
                 Event::Tick => {
@@ -97,8 +138,9 @@ where
                     if is_quit(&key) {
                         return Ok(());
                     }
-                    // Reveal and ratings only mean anything while a card is up.
-                    if self.triggers.is_waiting() {
+                    // Reveal and ratings only mean anything while a card is up — while Waiting, or
+                    // while paying an owed Review from the idle pane under an active gate (M7).
+                    if self.showing_card() {
                         self.handle_review_key(&key)?;
                     }
                 }
@@ -129,28 +171,54 @@ where
     /// (spec user story 12).
     fn rate(&mut self, rating: Rating) -> Result<()> {
         self.learning.rate(rating)?;
+        // The debt is paid for this cycle. A resurfaced card does not re-arm it (`arm_debt_if_owed`
+        // only fires from `None`), so the gate stays "one Review per handoff" (spec §Review debt).
+        self.debt = Debt::Paid;
         if self.triggers.is_waiting() {
             self.learning.surface()?;
         }
         Ok(())
     }
 
+    /// Whether a card is on screen and its keys are live: while Waiting, or while an active gate is
+    /// holding the next prompt on an owed Review, so the developer can pay it from the idle pane.
+    fn showing_card(&self) -> bool {
+        self.triggers.is_waiting() || (self.gate_active && self.debt == Debt::Owed)
+    }
+
+    /// Arm the debt if a card is now in flight and none was owed yet. Called after any surfacing so
+    /// that surfacing a card is what incurs the debt, and an idle wait (nothing surfaced) incurs
+    /// none. A `Paid` debt is left paid: one Review per cycle is enough.
+    fn arm_debt_if_owed(&mut self) {
+        if self.debt == Debt::None && !matches!(self.learning.view(), ReviewView::Empty) {
+            self.debt = Debt::Owed;
+        }
+    }
+
     fn draw(&mut self) -> Result<()> {
+        // Computed before the field borrow below: a card shows while Waiting, or while an active gate
+        // holds an owed Review. `holding` is that second case — shown from the idle pane, not a wait.
+        let showing = self.showing_card();
+        let waiting = self.triggers.is_waiting();
+        let holding = showing && !waiting;
+
         // Disjoint field borrows: the observer inspects the buffer the terminal just produced, and
         // the pane view borrows the in-flight card from `learning`.
         let Self {
             terminal,
-            triggers,
             learning,
             on_draw,
             ..
         } = self;
 
-        let waiting = triggers.is_waiting();
         let state = match learning.view() {
-            ReviewView::Question { front } if waiting => PaneState::Question { front },
-            ReviewView::Answer { front, back } if waiting => PaneState::Answer { front, back },
-            // Not waiting, or waiting with nothing left to review: the idle pane with real counts.
+            ReviewView::Question { front } if showing => PaneState::Question { front, holding },
+            ReviewView::Answer { front, back } if showing => PaneState::Answer {
+                front,
+                back,
+                holding,
+            },
+            // Not waiting and no owed card to pay: the idle pane with real counts.
             _ => {
                 let stats = learning.idle_stats()?;
                 PaneState::Idle {

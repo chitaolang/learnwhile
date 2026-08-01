@@ -14,10 +14,16 @@ use crate::furigana;
 /// What the pane is showing. The question side deliberately carries no answer text, so revealing is
 /// the only way the back reaches the buffer.
 pub enum PaneState<'a> {
-    /// Waiting, question side: the card's front, before the answer is revealed.
-    Question { front: &'a str },
-    /// Waiting, answer side: front and back, after the reveal key.
-    Answer { front: &'a str, back: &'a str },
+    /// Question side: the card's front, before the answer is revealed. `holding` is true when the
+    /// card is shown from the idle pane to pay an owed Review under an active Prompt Gate (M7),
+    /// rather than during a wait.
+    Question { front: &'a str, holding: bool },
+    /// Answer side: front and back, after the reveal key. `holding` as in `Question`.
+    Answer {
+        front: &'a str,
+        back: &'a str,
+        holding: bool,
+    },
     /// Not Waiting, or Waiting with nothing left to review. Carries the real counts so the pane
     /// tells "nothing due" apart from "not Waiting". `next_due` is preformatted for display.
     Idle {
@@ -36,9 +42,16 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
     // The width available for text inside the block, minus its two border columns. Furigana
     // pre-wraps to this so a reading and its base always share a line.
     let inner_width = areas[0].width.saturating_sub(2) as usize;
-    let waiting = || {
+    // The heading tells the developer why the card is up: a normal wait, or an active Prompt Gate
+    // holding their next prompt until they finish this Review (M7).
+    let heading = |holding: bool| {
+        let text = if holding {
+            "Review to continue"
+        } else {
+            "Waiting"
+        };
         Line::from(Span::styled(
-            "Waiting",
+            text,
             Style::default().add_modifier(Modifier::BOLD),
         ))
     };
@@ -49,8 +62,8 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
     let (lines, wrap, footer): (Vec<Line>, bool, &str) = match state {
         // The question side shows base kanji only, so a card testing a reading isn't handed its
         // answer (ADR-0013). An unannotated front stays on the exact prior draw path.
-        PaneState::Question { front } if furigana::has_ruby(front) => {
-            let mut lines = vec![waiting(), Line::from("")];
+        PaneState::Question { front, holding } if furigana::has_ruby(front) => {
+            let mut lines = vec![heading(*holding), Line::from("")];
             lines.extend(
                 furigana::layout(&furigana::base_only(front), inner_width)
                     .into_iter()
@@ -58,16 +71,18 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
             );
             (lines, false, "space reveal    q quit")
         }
-        PaneState::Question { front } => (
-            vec![waiting(), Line::from(""), Line::from(*front)],
+        PaneState::Question { front, holding } => (
+            vec![heading(*holding), Line::from(""), Line::from(*front)],
             true,
             "space reveal    q quit",
         ),
         // On reveal, front and back render with readings stacked over their kanji.
-        PaneState::Answer { front, back }
-            if furigana::has_ruby(front) || furigana::has_ruby(back) =>
-        {
-            let mut lines = vec![waiting(), Line::from("")];
+        PaneState::Answer {
+            front,
+            back,
+            holding,
+        } if furigana::has_ruby(front) || furigana::has_ruby(back) => {
+            let mut lines = vec![heading(*holding), Line::from("")];
             lines.extend(
                 furigana::layout(front, inner_width)
                     .into_iter()
@@ -81,9 +96,13 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
             );
             (lines, false, "1 Again   2 Hard   3 Good   4 Easy    q quit")
         }
-        PaneState::Answer { front, back } => (
+        PaneState::Answer {
+            front,
+            back,
+            holding,
+        } => (
             vec![
-                waiting(),
+                heading(*holding),
                 Line::from(""),
                 Line::from(*front),
                 Line::from(""),

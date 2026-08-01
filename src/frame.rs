@@ -20,6 +20,39 @@ pub const MAX_LINE_BYTES: usize = 64 * 1024;
 pub enum FrameType {
     TriggerOpen,
     TriggerClose,
+    /// A `--gate` hook asking, before it opens a Trigger, whether a Review is owed (ADR-0016). Unlike
+    /// the other two, this frame expects a reply on the same connection, and the host opens the
+    /// Trigger itself only when it allows the prompt.
+    GateQuery,
+}
+
+/// The host's reply to a [`FrameType::GateQuery`] (ADR-0016): may this prompt proceed, or is a
+/// Review owed first? The wire form is one bare token per line. Anything unrecognized or missing
+/// reads as [`Verdict::Allow`], so a garbled or absent verdict fails open (ADR-0004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Allow,
+    Block,
+}
+
+impl Verdict {
+    /// One newline-terminated token, the reply the host writes back down the connection.
+    pub fn to_line(self) -> String {
+        let token = match self {
+            Verdict::Allow => "allow",
+            Verdict::Block => "block",
+        };
+        format!("{token}\n")
+    }
+
+    /// Parse a verdict line, defaulting to `Allow` on anything unexpected so a garbled reply never
+    /// blocks the developer.
+    pub fn from_line(line: &str) -> Verdict {
+        match line.trim() {
+            "block" => Verdict::Block,
+            _ => Verdict::Allow,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

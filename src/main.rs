@@ -72,20 +72,23 @@ fn main() {
     }
 }
 
-/// The Trigger Adapter. Exits 0 whatever happens, including on a panic (ADR-0004).
+/// The Trigger Adapter. Exits 0 whatever happens, including on a panic (ADR-0004). Flags may appear
+/// in any order: `--gate` enables the Prompt Gate (ADR-0014); `--open`/`--close` force a transition
+/// for the manual test plans.
 fn run_hook(rest: &[String]) {
-    let forced = match rest.first().map(String::as_str) {
-        Some("--open") => Some(FrameType::TriggerOpen),
-        Some("--close") => Some(FrameType::TriggerClose),
+    let gated = rest.iter().any(|arg| arg == "--gate");
+    let forced = rest.iter().find_map(|arg| match arg.as_str() {
+        "--open" => Some(FrameType::TriggerOpen),
+        "--close" => Some(FrameType::TriggerClose),
         _ => None,
-    };
+    });
 
     // Swallow a panic's output as well as the panic: a backtrace on stderr during a hook would
     // be noise in the developer's agent session.
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let _ = std::panic::catch_unwind(|| {
-        learnwhile::hook::run(&default_socket_path(), forced);
+        learnwhile::hook::run(&default_socket_path(), forced, gated);
     });
     std::panic::set_hook(previous);
 }
