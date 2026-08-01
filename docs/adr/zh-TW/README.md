@@ -19,6 +19,8 @@
 | [0009](./0009-single-event-loop-producer-threads.md) | Host 是由 producer thread 餵入的單一 event loop；沒有 async runtime |
 | [0010](./0010-lapsed-cards-requeue-within-session.md) | Lapse 過的卡片會在同一個 Session 內回來；禁止提前的規則跨 Session 仍然成立 |
 | [0011](./0011-session-is-host-process-lifetime.md) | 一個 Session 就是 host process 的生命週期 |
+| [0012](./0012-furigana-is-inline-notation-rendered-at-draw-time.md) | furigana 是行內標記，於繪製時才解析與渲染 |
+| [0013](./0013-furigana-renders-on-the-answer-side-only.md) | furigana 只在答案面渲染 |
 
 ## 它們的關係
 
@@ -28,6 +30,7 @@
 - **0005** 指出遺失 Trigger close 必須可被容忍，但沒有說如何做到 -> **0006** 設定 expiry policy。
 - **0010** 讓 lapse queue「隨 Session 一起消滅」，但沒有說是什麼界定了一個 Session -> **0011** 把 Session 定義為 host process 的生命週期。
 - **0003** 建立 thin adapter 的方向，但沒有說如何發佈 -> **0008** 把 adapter 做成 host binary 的 subcommand。
+- **0012** 把 furigana 定為一個行內標記的 render 問題，卻沒有說讀音要*在哪裡*顯示 -> **0013** 把它限制在答案面，將 ADR-0002「不要搶先透露複習內容」從排程器延伸到揭示邊界。
 - **0004**、**0006** 與 Review flow 各自帶來一個 host 必須處理的輸入，卻沒有說它們如何共存 -> **0009** 把三者序列化到單一 event loop 上。
 
 有一筆紀錄收窄了較早的一筆：
