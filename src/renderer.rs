@@ -9,6 +9,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+use crate::furigana;
+
 /// What the pane is showing. The question side deliberately carries no answer text, so revealing is
 /// the only way the back reaches the buffer.
 pub enum PaneState<'a> {
@@ -31,40 +33,72 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
 
     let block = Block::default().borders(Borders::ALL).title(" LearnWhile ");
 
+    // The width available for text inside the block, minus its two border columns. Furigana
+    // pre-wraps to this so a reading and its base always share a line.
+    let inner_width = areas[0].width.saturating_sub(2) as usize;
+    let waiting = || {
+        Line::from(Span::styled(
+            "Waiting",
+            Style::default().add_modifier(Modifier::BOLD),
+        ))
+    };
+
     // The footer names the keys available in the current state, so a developer mid-wait never has
-    // to remember them (milestone: available keys visible on screen).
-    let (body, footer) = match state {
+    // to remember them (milestone: available keys visible on screen). `wrap` is false only on the
+    // furigana path, whose lines are already laid out; every other state keeps ratatui's word wrap.
+    let (lines, wrap, footer): (Vec<Line>, bool, &str) = match state {
+        // The question side shows base kanji only, so a card testing a reading isn't handed its
+        // answer (ADR-0013). An unannotated front stays on the exact prior draw path.
+        PaneState::Question { front } if furigana::has_ruby(front) => {
+            let mut lines = vec![waiting(), Line::from("")];
+            lines.extend(
+                furigana::layout(&furigana::base_only(front), inner_width)
+                    .into_iter()
+                    .map(Line::from),
+            );
+            (lines, false, "space reveal    q quit")
+        }
         PaneState::Question { front } => (
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Waiting",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from(*front),
-            ]),
+            vec![waiting(), Line::from(""), Line::from(*front)],
+            true,
             "space reveal    q quit",
         ),
+        // On reveal, front and back render with readings stacked over their kanji.
+        PaneState::Answer { front, back }
+            if furigana::has_ruby(front) || furigana::has_ruby(back) =>
+        {
+            let mut lines = vec![waiting(), Line::from("")];
+            lines.extend(
+                furigana::layout(front, inner_width)
+                    .into_iter()
+                    .map(Line::from),
+            );
+            lines.push(Line::from(""));
+            lines.extend(
+                furigana::layout(back, inner_width)
+                    .into_iter()
+                    .map(Line::from),
+            );
+            (lines, false, "1 Again   2 Hard   3 Good   4 Easy    q quit")
+        }
         PaneState::Answer { front, back } => (
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Waiting",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )),
+            vec![
+                waiting(),
                 Line::from(""),
                 Line::from(*front),
                 Line::from(""),
                 Line::from(*back),
-            ]),
+            ],
+            true,
             "1 Again   2 Hard   3 Good   4 Easy    q quit",
         ),
         PaneState::Idle {
-            waiting,
+            waiting: is_waiting,
             due_today,
             new_remaining,
             next_due,
         } => {
-            let (header, header_modifier) = if *waiting {
+            let (header, header_modifier) = if *is_waiting {
                 ("Waiting", Modifier::BOLD)
             } else {
                 ("Not waiting", Modifier::DIM)
@@ -74,7 +108,7 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
                 None => "Next due: nothing scheduled".to_string(),
             };
             (
-                Paragraph::new(vec![
+                vec![
                     Line::from(Span::styled(
                         header,
                         Style::default().add_modifier(header_modifier),
@@ -84,13 +118,18 @@ pub fn draw(frame: &mut Frame, state: &PaneState) {
                         "Due now: {due_today}    New remaining: {new_remaining}"
                     )),
                     Line::from(next),
-                ]),
+                ],
+                true,
                 "q quit",
             )
         }
     };
 
-    frame.render_widget(body.block(block).wrap(Wrap { trim: true }), areas[0]);
+    let mut body = Paragraph::new(lines).block(block);
+    if wrap {
+        body = body.wrap(Wrap { trim: true });
+    }
+    frame.render_widget(body, areas[0]);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             footer,

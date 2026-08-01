@@ -11,6 +11,12 @@ const REVEAL: KeyCode = KeyCode::Char(' ');
 const FRONT: &str = "「勉強」は英語で何と言いますか？";
 const BACK: &str = "study（勉強する）";
 
+// A furigana-annotated card: the reading rides inline in the front (spec §Notation).
+const RUBY_FRONT: &str = " 勉強[べんきょう]";
+const RUBY_READING: &str = "べんきょう";
+const RUBY_BASE: &str = "勉強";
+const RUBY_BACK: &str = "study";
+
 #[test]
 fn a_kanji_card_renders_front_and_back_contiguously() {
     let host = spawn_test_host_with_cards(&[(FRONT, BACK)]);
@@ -31,6 +37,36 @@ fn a_kanji_card_renders_front_and_back_contiguously() {
     );
     host.press(REVEAL);
     host.wait_for(BACK);
+
+    host.shutdown();
+}
+
+#[test]
+fn furigana_is_hidden_until_reveal_then_stacks_over_its_kanji() {
+    let host = spawn_test_host_with_cards(&[(RUBY_FRONT, RUBY_BACK)]);
+    host.open("session-a");
+
+    // Question side: base kanji only. The reading is the answer, so it must not be on screen yet.
+    host.wait_for(RUBY_BASE);
+    let pane = host.pane();
+    assert!(
+        !pane.contains(RUBY_READING),
+        "the reading leaked onto the question side. Pane:\n{pane}"
+    );
+
+    // Reveal: the reading now sits on the line directly above its kanji.
+    host.press(REVEAL);
+    host.wait_for(RUBY_READING);
+    let pane = host.pane();
+    let lines: Vec<&str> = pane.lines().collect();
+    let base_row = lines
+        .iter()
+        .position(|l| l.contains(RUBY_BASE))
+        .expect("base kanji on screen");
+    assert!(
+        base_row > 0 && lines[base_row - 1].contains(RUBY_READING),
+        "the reading was not on the line directly above its kanji. Pane:\n{pane}"
+    );
 
     host.shutdown();
 }

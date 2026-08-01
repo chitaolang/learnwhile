@@ -7,6 +7,7 @@
 pub mod clock;
 pub mod event;
 pub mod frame;
+pub mod furigana;
 pub mod hook;
 pub mod host;
 pub mod learning;
