@@ -21,6 +21,9 @@
 | [0011](./0011-session-is-host-process-lifetime.md) | 一個 Session 就是 host process 的生命週期 |
 | [0012](./0012-furigana-is-inline-notation-rendered-at-draw-time.md) | furigana 是行內標記，於繪製時才解析與渲染 |
 | [0013](./0013-furigana-renders-on-the-answer-side-only.md) | furigana 只在答案面渲染 |
+| [0014](./0014-prompt-gate-opt-in-fail-open.md) | Prompt Gate 以 hook flag 選擇啟用，且 fail-open |
+| [0015](./0015-gate-acts-on-outgoing-prompt-and-shows-owed-card-while-idle.md) | 啟用中的 Prompt Gate 作用在送出的 prompt 上，並在閒置時顯示欠著的卡片 |
+| [0016](./0016-gate-makes-userpromptsubmit-request-response.md) | Prompt Gate 讓 UserPromptSubmit 這一次交換變成 request/response |
 
 ## 它們的關係
 
@@ -31,6 +34,7 @@
 - **0010** 讓 lapse queue「隨 Session 一起消滅」，但沒有說是什麼界定了一個 Session -> **0011** 把 Session 定義為 host process 的生命週期。
 - **0003** 建立 thin adapter 的方向，但沒有說如何發佈 -> **0008** 把 adapter 做成 host binary 的 subcommand。
 - **0012** 把 furigana 定為一個行內標記的 render 問題，卻沒有說讀音要*在哪裡*顯示 -> **0013** 把它限制在答案面，將 ADR-0002「不要搶先透露複習內容」從排程器延伸到揭示邊界。
+- **0014** 讓 Prompt Gate 選擇啟用，卻沒有說被阻擋的開發者在閒置時如何複習 -> **0015** 在閒置時顯示欠著的卡片，讓債務隨時可還。**0016** 從 **0007** 的單向 frame 裡，只為那一次交換切出 gate 需要的 request/response。這三筆都是對 **0001** 被動性與 **0004** fail-open 刻意開的、需選擇啟用的例外，絕非預設。
 - **0004**、**0006** 與 Review flow 各自帶來一個 host 必須處理的輸入，卻沒有說它們如何共存 -> **0009** 把三者序列化到單一 event loop 上。
 
 有一筆紀錄收窄了較早的一筆：
