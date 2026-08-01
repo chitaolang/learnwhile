@@ -46,8 +46,9 @@ failed one; correctness is not what a Review measures.
 _Avoid_: fail, miss, relearn, forget
 
 **Learning Contract**:
-An optional commitment that lets a Review outcome gate a chosen action. Always opt-in;
-when absent or failed, nothing is blocked.
+An optional commitment that lets a Review outcome gate a chosen action. Always opt-in. When
+not opted in, or when the outcome cannot be evaluated (host down, error), nothing is blocked.
+An opted-in Contract blocks exactly when its Review requirement is genuinely unmet.
 _Avoid_: rule, policy, guard
 
 **Prompt Gate**:
@@ -56,6 +57,8 @@ next prompt is allowed to proceed.
 _Avoid_: block, lock, paywall
 
 **Fail-open**:
-The default posture: a missing, unmet, or errored Learning Contract never blocks the
-developer or the agent. Blocking only ever happens when a Contract is explicitly opted into.
+The default posture: with no Contract opted in, nothing ever blocks the developer or the
+agent, and a Contract that cannot be evaluated (host unreachable, error, or disabled) also
+never blocks. Blocking happens only when an opted-in Contract's Review requirement is
+genuinely unmet.
 _Avoid_: fail-safe, fail-closed
