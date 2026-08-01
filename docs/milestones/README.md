@@ -30,6 +30,7 @@ M1 through M5 are v1. The first post-v1 slice follows the same rule and format:
 | # | Milestone | What a developer can do at the end |
 |---|---|---|
 | [M6](./M6-furigana-display.md) | Furigana display | Author Japanese cards with readings and see furigana over the kanji on reveal |
+| [M7](./M7-prompt-gate.md) | Prompt Gate | Opt in to hold the next prompt until one Review is done, with the owed card always payable |
 
 ## Reading a milestone
 
