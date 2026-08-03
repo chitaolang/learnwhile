@@ -194,10 +194,12 @@ any producer-thread failure is recorded there. The pane stays passive and silent
 ([ADR-0001](./docs/adr/0001-agent-hook-trigger-passive-surface.md)), so the log carries the
 diagnostics rather than the screen.
 
-To reset your deck, stop the host and delete the database:
+To reset, stop the host and delete the database. This clears your cards, review history, and any
+config changes. The next `learnwhile seed` or host start recreates an empty database with the
+default settings. The command below works whether or not `$XDG_DATA_HOME` is set:
 
 ```sh
-rm -f ~/.local/share/learnwhile/learnwhile.db   # or under $XDG_DATA_HOME
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/learnwhile/learnwhile.db"
 ```
 
 ## Development
@@ -408,10 +410,12 @@ Host 是資料庫與 socket 的唯一擁有者（[ADR-0003](./docs/adr/0003-long
 執行緒的失敗都會記在那裡。窗格刻意保持被動且安靜（[ADR-0001](./docs/adr/0001-agent-hook-trigger-passive-surface.md)），
 所以承載診斷訊息的是 log，而不是畫面。
 
-要重置你的牌組，先停掉 host，再刪掉資料庫：
+要重置，先停掉 host，再刪掉資料庫。這會清掉你的卡片、複習歷史，以及任何 config 變更。下次執行
+`learnwhile seed` 或啟動 host 時，會用預設值重新建立一個空的資料庫。不論 `$XDG_DATA_HOME` 有沒有
+設定，下面這個指令都適用：
 
 ```sh
-rm -f ~/.local/share/learnwhile/learnwhile.db   # 或在 $XDG_DATA_HOME 底下
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/learnwhile/learnwhile.db"
 ```
 
 ## 開發
