@@ -27,6 +27,17 @@ cargo build --release
 # put target/release/learnwhile somewhere on your PATH
 ```
 
+Or let the install script build it and copy the binary onto your PATH (`~/.local/bin` by default,
+or set `PREFIX`):
+
+```sh
+./scripts/install.sh
+# PREFIX=/usr/local/bin ./scripts/install.sh   # a system-wide location, may need sudo
+```
+
+To remove it later, run `./scripts/uninstall.sh`. Add `--purge` to also delete your cards, review
+history, logs, and socket.
+
 ## Wire up the Claude Code hook
 
 Add this to `~/.claude/settings.json`. A Trigger opens when you hand off and closes when the
@@ -285,6 +296,17 @@ socket（[ADR-0004](./docs/adr/0004-unix-socket-ipc-fail-open.md)）。
 cargo build --release
 # 把 target/release/learnwhile 放到 PATH 上的任一個目錄
 ```
+
+或者讓安裝腳本替你建置，並把執行檔複製到 PATH 上的某個 bin 目錄（預設是 `~/.local/bin`，
+也可以設定 `PREFIX`）：
+
+```sh
+./scripts/install.sh
+# PREFIX=/usr/local/bin ./scripts/install.sh   # 系統層級的位置，可能需要 sudo
+```
+
+之後要移除，執行 `./scripts/uninstall.sh`。加上 `--purge` 會連同你的卡片、複習歷史、log
+與 socket 一併刪除。
 
 ## 設定 Claude Code hook
 
