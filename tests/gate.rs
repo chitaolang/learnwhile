@@ -175,17 +175,16 @@ fn gated_hook_fails_open_and_is_silent_with_no_host() {
 }
 
 /// A fake host that answers the first gate query with `verdict`, so we can test the hook's own
-/// output without booting a real host.
-fn fake_host_replying(socket_path: std::path::PathBuf, verdict: &'static str) {
+/// output without booting a real host. It writes the verdict with the real encoder, so the test
+/// exercises the actual wire form the host produces.
+fn fake_host_replying(socket_path: std::path::PathBuf, verdict: Verdict) {
     std::thread::spawn(move || {
         let listener = UnixListener::bind(&socket_path).expect("bind fake host");
         if let Ok((stream, _)) = listener.accept() {
             let mut reader = BufReader::new(stream);
             let mut query = String::new();
             let _ = reader.read_line(&mut query); // the gate query line
-            let _ = reader
-                .get_mut()
-                .write_all(format!("{verdict}\n").as_bytes());
+            let _ = reader.get_mut().write_all(verdict.to_line().as_bytes());
             let _ = reader.get_mut().flush();
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -195,7 +194,7 @@ fn fake_host_replying(socket_path: std::path::PathBuf, verdict: &'static str) {
 #[test]
 fn gated_hook_prints_the_block_verdict_when_the_host_blocks() {
     let dir = tempfile::tempdir().expect("temp dir");
-    fake_host_replying(dir.path().join("learnwhile.sock"), "block");
+    fake_host_replying(dir.path().join("learnwhile.sock"), Verdict::Block);
     // Give the fake host a moment to bind before the hook connects.
     std::thread::sleep(Duration::from_millis(50));
 
@@ -211,7 +210,7 @@ fn gated_hook_prints_the_block_verdict_when_the_host_blocks() {
 #[test]
 fn gated_hook_is_silent_when_the_host_allows() {
     let dir = tempfile::tempdir().expect("temp dir");
-    fake_host_replying(dir.path().join("learnwhile.sock"), "allow");
+    fake_host_replying(dir.path().join("learnwhile.sock"), Verdict::Allow);
     std::thread::sleep(Duration::from_millis(50));
 
     let run = run_gated_hook(dir.path(), OPEN_PAYLOAD);

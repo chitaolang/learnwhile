@@ -27,29 +27,64 @@ pub enum FrameType {
 }
 
 /// The host's reply to a [`FrameType::GateQuery`] (ADR-0016): may this prompt proceed, or is a
-/// Review owed first? The wire form is one bare token per line. Anything unrecognized or missing
-/// reads as [`Verdict::Allow`], so a garbled or absent verdict fails open (ADR-0004).
+/// Review owed first? Sent as one versioned JSON line, symmetric with the trigger frames so the
+/// reply can grow a field without breaking adapters, rather than the bare positional text ADR-0007
+/// rejects. Anything unrecognized, an unknown `v`, or an absent reply reads as [`Verdict::Allow`],
+/// so a garbled or missing verdict fails open (ADR-0004).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Allow,
     Block,
 }
 
+/// The wire form of a [`Verdict`]: a JSON object carrying the protocol version and a `type`, so it
+/// reuses the trigger-frame framing (ADR-0007) rather than a bare token.
+#[derive(Serialize, Deserialize)]
+struct VerdictFrame {
+    v: u32,
+    #[serde(rename = "type")]
+    frame_type: VerdictType,
+    verdict: VerdictValue,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VerdictType {
+    GateVerdict,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VerdictValue {
+    Allow,
+    Block,
+}
+
 impl Verdict {
-    /// One newline-terminated token, the reply the host writes back down the connection.
+    /// One newline-terminated JSON line, the reply the host writes back down the connection.
     pub fn to_line(self) -> String {
-        let token = match self {
-            Verdict::Allow => "allow",
-            Verdict::Block => "block",
+        let frame = VerdictFrame {
+            v: PROTOCOL_VERSION,
+            frame_type: VerdictType::GateVerdict,
+            verdict: match self {
+                Verdict::Allow => VerdictValue::Allow,
+                Verdict::Block => VerdictValue::Block,
+            },
         };
-        format!("{token}\n")
+        // A fixed, tiny struct: serialization cannot fail.
+        let mut line = serde_json::to_string(&frame).expect("verdict serializes");
+        line.push('\n');
+        line
     }
 
-    /// Parse a verdict line, defaulting to `Allow` on anything unexpected so a garbled reply never
-    /// blocks the developer.
+    /// Parse a verdict line, defaulting to `Allow` on anything unexpected — bad JSON, an unknown
+    /// protocol version, or a missing reply — so a garbled verdict never blocks the developer.
     pub fn from_line(line: &str) -> Verdict {
-        match line.trim() {
-            "block" => Verdict::Block,
+        match serde_json::from_str::<VerdictFrame>(line) {
+            Ok(frame) if frame.v == PROTOCOL_VERSION => match frame.verdict {
+                VerdictValue::Allow => Verdict::Allow,
+                VerdictValue::Block => Verdict::Block,
+            },
             _ => Verdict::Allow,
         }
     }
