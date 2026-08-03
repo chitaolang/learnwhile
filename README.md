@@ -97,6 +97,23 @@ when you reveal, so a "read this kanji" card stays an honest test. Cards with no
 exactly as before. See
 [`docs/specs/furigana-ruby-display.md`](./docs/specs/furigana-ruby-display.md).
 
+### JLPT decks
+
+Ready-made Japanese decks live in [`data/anki-jlpt/`](./data/anki-jlpt/): one seed file per JLPT
+level (`n5.tsv` through `n1.tsv`, about 10,600 cards total), each already in the furigana notation
+above. Seed one with `learnwhile seed data/anki-jlpt/n5.tsv`.
+
+Those files are generated from the [`5mdld/anki-jlpt-decks`](https://github.com/5mdld/anki-jlpt-decks)
+source export by the `extract` subcommand:
+
+```sh
+learnwhile extract notes.csv [out-dir]   # writes n1.tsv .. n5.tsv; out-dir defaults to .
+```
+
+It reads the deck's tab-separated source and writes one `front<TAB>back` file per level, ready for
+`seed`. Source data is CC BY-NC 4.0, so the decks carry the same license. See
+[`data/anki-jlpt/README.md`](./data/anki-jlpt/README.md).
+
 ## Inspecting and tuning
 
 Two subcommands read the same database. Run them with the host stopped or running, it makes no
@@ -318,6 +335,23 @@ learnwhile seed cards.tsv
 讀音，需要界定範圍時用空白分隔（`この 間[あいだ]`）。讀音在問題面會被藏起來，翻答案時才堆疊顯示
 在它的漢字上方，所以「讀出這個漢字」的卡片仍然是個誠實的測驗。沒有方括號的卡片，顯示方式和以前
 完全一樣。詳見 [`docs/specs/furigana-ruby-display.md`](./docs/specs/furigana-ruby-display.md)。
+
+### JLPT 牌組
+
+現成的日文牌組放在 [`data/anki-jlpt/`](./data/anki-jlpt/)：每個 JLPT 級別各一個匯入檔（`n5.tsv`
+到 `n1.tsv`，總共約 10,600 張卡），都已採用上面的 furigana 記法。用
+`learnwhile seed data/anki-jlpt/n5.tsv` 匯入其中一個。
+
+這些檔案是由 `extract` 子指令，從 [`5mdld/anki-jlpt-decks`](https://github.com/5mdld/anki-jlpt-decks)
+的原始匯出檔產生的：
+
+```sh
+learnwhile extract notes.csv [out-dir]   # 產生 n1.tsv .. n5.tsv；out-dir 預設為當前目錄
+```
+
+它會讀取牌組以 tab 分隔的原始檔，為每個級別各寫出一個 `front<TAB>back` 檔案，可直接用於 `seed`。
+原始資料採用 CC BY-NC 4.0 授權，因此這些牌組也沿用同一份授權。詳見
+[`data/anki-jlpt/README.md`](./data/anki-jlpt/README.md)。
 
 ## 檢視與調整
 
