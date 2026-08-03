@@ -33,6 +33,59 @@ enum Debt {
     Paid,
 }
 
+/// The Prompt Gate's Session state (M7): the review debt, plus whether a gate query has been seen
+/// this Session. Bundled so the "one Review per handoff" invariant lives in one place. Tracked
+/// whether or not the developer opted in; only read when they have.
+struct Gate {
+    debt: Debt,
+    /// Set the first time a gate query arrives this Session. Until then the idle pane never shows a
+    /// card, so a developer who never passes `--gate` sees v1 behaviour unchanged (ADR-0015).
+    active: bool,
+}
+
+impl Gate {
+    fn new() -> Self {
+        Self {
+            debt: Debt::None,
+            active: false,
+        }
+    }
+
+    /// Record that this Session is using the gate.
+    fn seen(&mut self) {
+        self.active = true;
+    }
+
+    /// Whether the next prompt must be held: a Review is owed.
+    fn owed(&self) -> bool {
+        self.debt == Debt::Owed
+    }
+
+    /// Whether an owed card should be held on the idle pane for payment — only under an active gate.
+    fn holding(&self) -> bool {
+        self.active && self.owed()
+    }
+
+    /// Start a new cycle, so the next surfaced card re-arms the debt.
+    fn begin_cycle(&mut self) {
+        self.debt = Debt::None;
+    }
+
+    /// A rating clears the debt for this cycle. A resurfaced card cannot re-arm it (arming only
+    /// fires from `None`), so the gate stays "one Review per handoff".
+    fn pay(&mut self) {
+        self.debt = Debt::Paid;
+    }
+
+    /// Arm the debt if a card is now in flight and none was owed yet. An idle wait (no card) arms
+    /// nothing; a `Paid` debt is left paid.
+    fn arm(&mut self, card_in_flight: bool) {
+        if self.debt == Debt::None && card_in_flight {
+            self.debt = Debt::Owed;
+        }
+    }
+}
+
 /// The default Trigger expiry (ADR-0006), erring short: expiring early clears a card while the
 /// developer is still waiting, which self-corrects on the next Trigger, whereas expiring late
 /// pins a stale card up forever.
@@ -52,11 +105,8 @@ pub struct Host<B: Backend> {
     clock: Arc<dyn Clock>,
     learning: Learning,
     on_draw: Option<DrawObserver>,
-    /// Review debt for the Prompt Gate (M7).
-    debt: Debt,
-    /// Set the first time a gate query arrives this Session. Until then the idle pane never shows a
-    /// card, so a developer who never passes `--gate` sees v1 behaviour unchanged (ADR-0015).
-    gate_active: bool,
+    /// The Prompt Gate's Session state (M7).
+    gate: Gate,
 }
 
 impl<B: Backend> Host<B>
@@ -75,8 +125,7 @@ where
             clock,
             learning,
             on_draw: None,
-            debt: Debt::None,
-            gate_active: false,
+            gate: Gate::new(),
         }
     }
 
@@ -102,15 +151,15 @@ where
                 },
                 // A `--gate` hook asking whether a Review is owed before its prompt proceeds (M7).
                 Event::GateQuery { key, reply } => {
-                    self.gate_active = true;
-                    if self.debt == Debt::Owed {
+                    self.gate.seen();
+                    if self.gate.owed() {
                         // Hold the prompt. The owed card is already shown while idle, so the
                         // developer can clear it. The Trigger does not open: no handoff happened.
                         let _ = reply.send(Verdict::Block);
                     } else {
                         let _ = reply.send(Verdict::Allow);
                         // A new cycle: clear the debt, then open the Trigger exactly as a plain open.
-                        self.debt = Debt::None;
+                        self.gate.begin_cycle();
                         self.open_and_surface(key)?;
                     }
                 }
@@ -157,9 +206,7 @@ where
     /// (spec user story 12).
     fn rate(&mut self, rating: Rating) -> Result<()> {
         self.learning.rate(rating)?;
-        // The debt is paid for this cycle. A resurfaced card does not re-arm it (`arm_debt_if_owed`
-        // only fires from `None`), so the gate stays "one Review per handoff" (spec §Review debt).
-        self.debt = Debt::Paid;
+        self.gate.pay();
         if self.triggers.is_waiting() {
             self.learning.surface()?;
         }
@@ -169,16 +216,13 @@ where
     /// Whether a card is on screen and its keys are live: while Waiting, or while an active gate is
     /// holding the next prompt on an owed Review, so the developer can pay it from the idle pane.
     fn showing_card(&self) -> bool {
-        self.triggers.is_waiting() || (self.gate_active && self.debt == Debt::Owed)
+        self.triggers.is_waiting() || self.gate.holding()
     }
 
-    /// Arm the debt if a card is now in flight and none was owed yet. Called after any surfacing so
-    /// that surfacing a card is what incurs the debt, and an idle wait (nothing surfaced) incurs
-    /// none. A `Paid` debt is left paid: one Review per cycle is enough.
+    /// Arm the debt from a surfacing: a card in flight incurs the Review debt, an idle wait does not.
     fn arm_debt_if_owed(&mut self) {
-        if self.debt == Debt::None && !matches!(self.learning.view(), ReviewView::Empty) {
-            self.debt = Debt::Owed;
-        }
+        let card_in_flight = !matches!(self.learning.view(), ReviewView::Empty);
+        self.gate.arm(card_in_flight);
     }
 
     /// Open a Trigger and, if this began a wait, surface a card into it, then arm the debt. Shared by
