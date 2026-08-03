@@ -7,12 +7,14 @@ When you hand work to your agent, a card appears in a pane beside it. When the a
 back, the card clears. The pane never steals focus, and nothing is ever blocked: if LearnWhile
 is not running, your agent behaves exactly as it always has.
 
-**Status: v1 feature-complete (M1–M5).** Seed a deck from a file and do real Reviews during your
+**Status: v1 feature-complete (M1–M5), plus two post-v1 additions (M6–M7).** Seed a deck from a file and do real Reviews during your
 waits: question, reveal, rate. Every rating is persisted and the card rescheduled by FSRS, with
 genuinely due cards shown before new ones (never pulled forward), a daily new-card cap, an idle
 pane that shows what is due, mid-review resume across waits, and same-day re-attempts of failed
 cards within a sitting. A second host refuses to start, a killed host's stale socket is recovered
-on the next run, and diagnostics go to a rotating log file. See
+on the next run, and diagnostics go to a rotating log file. Beyond v1, Japanese cards can carry
+furigana readings that appear over the kanji when you reveal (M6), and an opt-in Prompt Gate can
+hold your next prompt until you finish one Review (M7). See
 [`docs/milestones/`](./docs/milestones/README.md).
 
 ## Install
@@ -86,6 +88,15 @@ again without duplicating anything. This is a convenience for trying LearnWhile,
 Anki-style importer, so it takes TSV and nothing else. The database lives under your XDG data
 directory (`$XDG_DATA_HOME/learnwhile/`, or `~/.local/share/learnwhile/`).
 
+### Furigana for Japanese cards
+
+A card's text may carry Anki-style furigana: `勉強[べんきょう]`, where the bracketed kana is the
+reading for the kanji immediately before it, with a space to bound a run where needed
+(`この 間[あいだ]`). The reading is hidden on the question side and appears stacked over its kanji
+when you reveal, so a "read this kanji" card stays an honest test. Cards with no brackets render
+exactly as before. See
+[`docs/specs/furigana-ruby-display.md`](./docs/specs/furigana-ruby-display.md).
+
 ## Inspecting and tuning
 
 Two subcommands read the same database. Run them with the host stopped or running, it makes no
@@ -139,6 +150,23 @@ you rate it anything other than Again.
 If the agent comes back while you are mid-review, the card is not lost. It is waiting in the same
 state — a revealed answer stays revealed — on your next wait. Ignoring a card costs nothing: there
 is no timer and no nagging. A sitting lasts as long as the host runs; restarting it starts fresh.
+
+## Prompt Gate (optional)
+
+By default nothing is ever blocked. If you want a commitment device, point your `UserPromptSubmit`
+hook at `learnwhile hook --gate` instead:
+
+```json
+"UserPromptSubmit": [
+  { "hooks": [{ "type": "command", "command": "learnwhile hook --gate" }] }
+]
+```
+
+With the gate on, your next prompt is held until you complete one Review. The owed card stays in the
+pane even while idle, so you can always clear it: rate it, and your prompt goes through. Without the
+flag the hook is unchanged, and the gate never blocks when LearnWhile is not running, is slow to
+answer, or has nothing to review. It is a self-imposed nudge, not a lock. See
+[`docs/specs/prompt-gate.md`](./docs/specs/prompt-gate.md).
 
 ## What happens if it is not running
 
@@ -204,12 +232,14 @@ the open-Trigger set or the event loop directly.
 當你把工作交給代理時，卡片會出現在旁邊的窗格裡；當代理需要你回來時，卡片就會清掉。這個窗格
 永遠不會搶走焦點，也永遠不會擋住你：如果 LearnWhile 沒有在執行，你的代理行為就和平常完全一樣。
 
-**目前狀態：v1 功能完成（M1–M5）。** 你可以從檔案匯入一副牌，並在等待的空檔做真正的複習
+**目前狀態：v1 功能完成（M1–M5），另有兩項 v1 之後的新增（M6–M7）。** 你可以從檔案匯入一副牌，並在等待的空檔做真正的複習
 （Review）：看題目、翻答案、評分。每一次評分都會被持久化，卡片也會由 FSRS 重新排程；真正到期
 的卡片會排在新卡之前（永遠不會提前拉出來）、有每日新卡上限、有顯示到期狀況的閒置窗格、複習能
 跨多次等待接續，並且在同一次 sitting 內對失敗的卡片提供當日重試。第二個 host 會拒絕啟動，被
 強制關閉的 host 留下的 stale socket 會在下次啟動時自動回復，診斷訊息則寫入每日輪替的 log 檔。
-詳見 [`docs/milestones/`](./docs/milestones/README.md)。
+在 v1 之外，日文卡片可以帶 furigana 讀音，翻答案時會顯示在漢字上方（M6）；另有一個可選擇啟用的
+Prompt Gate，能在你完成一次複習之前，先壓住你的下一個 prompt（M7）。詳見
+[`docs/milestones/`](./docs/milestones/README.md)。
 
 ## 安裝
 
@@ -280,6 +310,13 @@ learnwhile seed cards.tsv
 這只是讓你方便試用 LearnWhile 的功能，並不是 Anki 那種匯入器，因此它只吃 TSV、不吃其他格式。
 資料庫存放在你的 XDG 資料目錄底下（`$XDG_DATA_HOME/learnwhile/`，或 `~/.local/share/learnwhile/`）。
 
+### 日文卡片的 furigana
+
+卡片文字可以帶 Anki 風格的 furigana：`勉強[べんきょう]`，方括號裡的假名是緊接在它前面那串漢字的
+讀音，需要界定範圍時用空白分隔（`この 間[あいだ]`）。讀音在問題面會被藏起來，翻答案時才堆疊顯示
+在它的漢字上方，所以「讀出這個漢字」的卡片仍然是個誠實的測驗。沒有方括號的卡片，顯示方式和以前
+完全一樣。詳見 [`docs/specs/furigana-ruby-display.md`](./docs/specs/furigana-ruby-display.md)。
+
 ## 檢視與調整
 
 有兩個子指令會讀取同一個資料庫。host 有沒有在執行都可以跑，沒有差別：
@@ -330,6 +367,22 @@ learnwhile          # 或：learnwhile host
 如果代理在你複習到一半時回來了，卡片不會遺失。它會保持原狀等著你 —— 已經翻開的答案仍然是
 翻開的 —— 在你下一次等待時繼續。忽略一張卡片不會有任何代價：沒有計時器，也不會一直催你。
 一次 sitting 會持續到 host 停止為止；重新啟動 host 就是重新開始。
+
+## Prompt Gate（選用）
+
+預設情況下，什麼都不會被擋。如果你想要一個「承諾裝置」，把你的 `UserPromptSubmit` hook 改成指向
+`learnwhile hook --gate`：
+
+```json
+"UserPromptSubmit": [
+  { "hooks": [{ "type": "command", "command": "learnwhile hook --gate" }] }
+]
+```
+
+開啟 gate 後，你的下一個 prompt 會被壓住，直到你完成一次複習。欠著的那張卡片即使在閒置時也會留在
+窗格裡，所以你隨時都能清掉它：給它評分，你的 prompt 就會通過。沒有這個 flag 時，hook 的行為不變；
+而且當 LearnWhile 沒在執行、回應太慢、或沒有東西可複習時，gate 絕不會擋你。它是一個自我施加的
+提醒，不是鎖。詳見 [`docs/specs/prompt-gate.md`](./docs/specs/prompt-gate.md)。
 
 ## 如果它沒有在執行會怎樣
 
