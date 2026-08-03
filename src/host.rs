@@ -15,7 +15,7 @@ use ratatui::buffer::Buffer;
 
 use crate::clock::Clock;
 use crate::event::Event;
-use crate::frame::{FrameType, Verdict};
+use crate::frame::{FrameType, TriggerKey, Verdict};
 use crate::learning::{Learning, ReviewView};
 use crate::renderer::{PaneState, draw};
 use crate::scheduler::Rating;
@@ -91,25 +91,15 @@ where
 
         while let Ok(event) = rx.recv() {
             match event {
-                Event::Frame(frame) => {
-                    // Expiry is measured against the host's clock rather than the frame's `at`:
-                    // the adapter's clock is not ours to trust, and a skewed one would otherwise
-                    // decide when a Trigger drains.
-                    let now = self.clock.now();
-                    let edge = match frame.frame_type {
-                        FrameType::TriggerOpen => self.triggers.open(frame.key(), now),
-                        FrameType::TriggerClose => self.triggers.close(&frame.key()),
-                        // Gate queries reach the loop as `Event::GateQuery`, never here: the listener
-                        // routes them so it can write the verdict back on the connection.
-                        FrameType::GateQuery => WaitingEdge::Unchanged,
-                    };
-                    // The empty→non-empty edge is when a wait begins: surface a card into it. A
-                    // Review already in flight is left untouched (spec §Review flow).
-                    if edge == WaitingEdge::BecameWaiting {
-                        self.learning.surface()?;
+                Event::Frame(frame) => match frame.frame_type {
+                    FrameType::TriggerOpen => self.open_and_surface(frame.key())?,
+                    FrameType::TriggerClose => {
+                        self.triggers.close(&frame.key());
                     }
-                    self.arm_debt_if_owed();
-                }
+                    // Gate queries reach the loop as `Event::GateQuery`, never here: the listener
+                    // routes them so it can write the verdict back on the connection.
+                    FrameType::GateQuery => {}
+                },
                 // A `--gate` hook asking whether a Review is owed before its prompt proceeds (M7).
                 Event::GateQuery { key, reply } => {
                     self.gate_active = true;
@@ -121,11 +111,7 @@ where
                         let _ = reply.send(Verdict::Allow);
                         // A new cycle: clear the debt, then open the Trigger exactly as a plain open.
                         self.debt = Debt::None;
-                        let now = self.clock.now();
-                        if self.triggers.open(key, now) == WaitingEdge::BecameWaiting {
-                            self.learning.surface()?;
-                        }
-                        self.arm_debt_if_owed();
+                        self.open_and_surface(key)?;
                     }
                 }
                 Event::Tick => {
@@ -193,6 +179,20 @@ where
         if self.debt == Debt::None && !matches!(self.learning.view(), ReviewView::Empty) {
             self.debt = Debt::Owed;
         }
+    }
+
+    /// Open a Trigger and, if this began a wait, surface a card into it, then arm the debt. Shared by
+    /// a plain `TriggerOpen` frame and the gate's allow branch, which are the same handoff. Expiry is
+    /// measured against the host's clock, not the frame's `at`: the adapter's clock is not ours to
+    /// trust, and a skewed one would otherwise decide when a Trigger drains (ADR-0006). A Review
+    /// already in flight is left untouched (spec §Review flow).
+    fn open_and_surface(&mut self, key: TriggerKey) -> Result<()> {
+        let now = self.clock.now();
+        if self.triggers.open(key, now) == WaitingEdge::BecameWaiting {
+            self.learning.surface()?;
+        }
+        self.arm_debt_if_owed();
+        Ok(())
     }
 
     fn draw(&mut self) -> Result<()> {
