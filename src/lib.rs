@@ -4,6 +4,7 @@
 //! that integration tests can boot the host in-process through one seam (`testing`), rather than
 //! testing modules the developer never interacts with directly.
 
+pub mod anki;
 pub mod clock;
 pub mod event;
 pub mod frame;

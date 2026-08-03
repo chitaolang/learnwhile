@@ -32,12 +32,12 @@ learnwhile seed data/anki-jlpt/n5.tsv
 
 ## Regenerating
 
-These files are generated from the upstream Tab-separated source export by
-`examples/extract_anki_jlpt.rs`:
+These files are generated from the upstream Tab-separated source export by the `extract`
+subcommand (backed by `src/anki.rs`):
 
 ```
 curl -sL https://raw.githubusercontent.com/5mdld/anki-jlpt-decks/main/deck-source/notes.csv -o notes.csv
-cargo run --example extract_anki_jlpt -- notes.csv data/anki-jlpt
+learnwhile extract notes.csv data/anki-jlpt
 ```
 
 ## License and attribution

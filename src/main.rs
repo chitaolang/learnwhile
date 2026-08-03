@@ -15,6 +15,7 @@ use crossterm::ExecutableCommand;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use learnwhile::anki;
 use learnwhile::clock::SystemClock;
 use learnwhile::event::Event;
 use learnwhile::frame::FrameType;
@@ -58,6 +59,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("extract") => {
+            if let Err(error) = run_extract(&args[1..]) {
+                eprintln!("learnwhile: {error:#}");
+                std::process::exit(1);
+            }
+        }
         None | Some("host") => {
             if let Err(error) = run_host() {
                 eprintln!("learnwhile: {error:#}");
@@ -66,7 +73,7 @@ fn main() {
         }
         Some(other) => {
             eprintln!("learnwhile: unknown subcommand {other:?}");
-            eprintln!("usage: learnwhile [host|hook|seed|config|cards]");
+            eprintln!("usage: learnwhile [host|hook|seed|config|cards|extract]");
             std::process::exit(2);
         }
     }
@@ -300,6 +307,36 @@ fn run_cards() -> Result<()> {
             "{:>4}  {:<6}  {:<10}  {:>4}  {:>6}  {}",
             card.id, card.state, due, card.reps, card.lapses, card.front
         );
+    }
+    Ok(())
+}
+
+/// The `extract` subcommand: convert a `5mdld/anki-jlpt-decks` source export into per-level
+/// `seed`-ready TSVs (`n1.tsv` .. `n5.tsv`) in `out-dir`, which defaults to the working directory.
+/// A developer affordance for building seed decks, not a general Anki importer (see `anki`).
+fn run_extract(rest: &[String]) -> Result<()> {
+    let src = rest
+        .first()
+        .context("usage: learnwhile extract <notes.csv> [out-dir]")?;
+    let out = rest.get(1).map(String::as_str).unwrap_or(".");
+
+    let contents = std::fs::read_to_string(src).with_context(|| format!("reading export {src}"))?;
+    let (buckets, skipped) = anki::extract(&contents);
+
+    std::fs::create_dir_all(out).with_context(|| format!("creating {out}"))?;
+    for (i, rows) in buckets.rows.iter().enumerate() {
+        let level = i + 1;
+        let path = std::path::Path::new(out).join(format!("n{level}.tsv"));
+        let body = if rows.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", rows.join("\n"))
+        };
+        std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+        println!("{}  {} cards (N{level})", path.display(), rows.len());
+    }
+    if skipped > 0 {
+        println!("(skipped {skipped} rows: no level / empty word or def)");
     }
     Ok(())
 }
