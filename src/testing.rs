@@ -8,7 +8,7 @@
 //! Tests assert on what the developer could observe — the pane's contents and what persisted — and
 //! never reach into the open-Trigger set or the Review state machine.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -203,31 +203,15 @@ impl TestHost {
         self.await_draw_after(before, "a frame to be applied");
     }
 
-    /// Do the `--gate` hook's request/response over the real socket: write a gate query, read the
-    /// verdict, and return once the host has applied it. Returns whether the prompt was allowed or
-    /// blocked, exactly as the hook would see it.
+    /// Do the `--gate` hook's request/response over the real socket and return once the host has
+    /// applied it. Drives the same client the real hook uses (`hook::query_gate`) so the harness
+    /// exercises it, with a generous timeout so a loaded machine does not flake the verdict.
     pub fn gate_query(&self, session: &str) -> Verdict {
-        let frame = TriggerFrame::new(
-            FrameType::GateQuery,
-            crate::hook::ADAPTER_NAME,
-            session,
-            self.clock.now_for_frame(),
-        );
         let before = self.draws.load(Ordering::Acquire);
-        let stream = UnixStream::connect(&self.socket_path).expect("connect to test host");
-        stream
-            .set_read_timeout(Some(StdDuration::from_secs(5)))
-            .expect("set read timeout");
-        let mut reader = BufReader::new(stream);
-        reader
-            .get_mut()
-            .write_all(frame.to_line().expect("serialize gate query").as_bytes())
-            .expect("write gate query");
-        reader.get_mut().flush().expect("flush gate query");
-        let mut line = String::new();
-        reader.read_line(&mut line).expect("read verdict");
+        let verdict =
+            crate::hook::query_gate(&self.socket_path, session, StdDuration::from_secs(5));
         self.await_draw_after(before, "the gate query to be applied");
-        Verdict::from_line(&line)
+        verdict
     }
 
     pub fn open(&self, session: &str) {

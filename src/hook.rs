@@ -99,7 +99,7 @@ pub fn run(socket_path: &Path, forced: Option<FrameType>, gated: bool) {
     // Review is owed, and opens the Trigger itself only when it allows the prompt (ADR-0016). Every
     // other event, and the un-gated hook, stays fire-and-forget.
     if gated && frame_type == FrameType::TriggerOpen {
-        if query_gate(socket_path, session) == Verdict::Block {
+        if query_gate(socket_path, session, GATE_TIMEOUT) == Verdict::Block {
             block_the_prompt();
         }
         return;
@@ -113,21 +113,23 @@ pub fn run(socket_path: &Path, forced: Option<FrameType>, gated: bool) {
     send(socket_path, line.as_bytes());
 }
 
-/// Ask the host for a verdict, failing open to `Allow` on any error, timeout, or absent host so a
-/// gated prompt is never held by a problem on our side (ADR-0004).
-fn query_gate(socket_path: &Path, session: &str) -> Verdict {
+/// Ask the host for a verdict within `timeout`, failing open to `Allow` on any error, timeout, or
+/// absent host so a gated prompt is never held by a problem on our side (ADR-0004). This is the one
+/// gate client, shared by the real hook (which passes [`GATE_TIMEOUT`]) and the test harness (which
+/// passes a generous one), so the harness exercises it rather than a copy.
+pub(crate) fn query_gate(socket_path: &Path, session: &str, timeout: Duration) -> Verdict {
     let frame = TriggerFrame::new(FrameType::GateQuery, ADAPTER_NAME, session, Utc::now());
     let Ok(line) = frame.to_line() else {
         return Verdict::Allow;
     };
-    ask(socket_path, line.as_bytes()).unwrap_or(Verdict::Allow)
+    ask(socket_path, line.as_bytes(), timeout).unwrap_or(Verdict::Allow)
 }
 
 /// One bounded round-trip: connect, write the query, read the verdict line. `None` on any failure.
-fn ask(socket_path: &Path, bytes: &[u8]) -> Option<Verdict> {
+fn ask(socket_path: &Path, bytes: &[u8], timeout: Duration) -> Option<Verdict> {
     let stream = UnixStream::connect(socket_path).ok()?;
-    stream.set_write_timeout(Some(GATE_TIMEOUT)).ok()?;
-    stream.set_read_timeout(Some(GATE_TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
     let mut reader = BufReader::new(stream);
     reader.get_mut().write_all(bytes).ok()?;
     reader.get_mut().flush().ok()?;
