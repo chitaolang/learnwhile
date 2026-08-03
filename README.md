@@ -101,7 +101,23 @@ exactly as before. See
 
 Ready-made Japanese decks live in [`data/anki-jlpt/`](./data/anki-jlpt/): one seed file per JLPT
 level (`n5.tsv` through `n1.tsv`, about 10,600 cards total), each already in the furigana notation
-above. Seed one with `learnwhile seed data/anki-jlpt/n5.tsv`.
+above. Seed a level the same way as any other TSV:
+
+```sh
+# seed the N5 deck (807 cards); start here for the gentlest set
+learnwhile seed data/anki-jlpt/n5.tsv
+# → 807 added, 0 skipped (already present)
+
+# stack more levels whenever you like; re-running is safe, duplicates are skipped
+learnwhile seed data/anki-jlpt/n4.tsv
+learnwhile seed data/anki-jlpt/n1.tsv
+
+# confirm they landed
+learnwhile cards
+```
+
+Seeding a whole level does not flood you: the `new_cards_per_day` cap (20 by default) still meters
+how many new cards the pane introduces each day, so even the 4,044-card N1 deck feeds in gradually.
 
 Those files are generated from the [`5mdld/anki-jlpt-decks`](https://github.com/5mdld/anki-jlpt-decks)
 source export by the `extract` subcommand:
@@ -339,8 +355,24 @@ learnwhile seed cards.tsv
 ### JLPT 牌組
 
 現成的日文牌組放在 [`data/anki-jlpt/`](./data/anki-jlpt/)：每個 JLPT 級別各一個匯入檔（`n5.tsv`
-到 `n1.tsv`，總共約 10,600 張卡），都已採用上面的 furigana 記法。用
-`learnwhile seed data/anki-jlpt/n5.tsv` 匯入其中一個。
+到 `n1.tsv`，總共約 10,600 張卡），都已採用上面的 furigana 記法。匯入某一級的方式，和匯入其他
+TSV 完全相同：
+
+```sh
+# 匯入 N5 牌組（807 張卡）；想從最輕鬆的一組開始就從這裡起步
+learnwhile seed data/anki-jlpt/n5.tsv
+# → 807 added, 0 skipped (already present)
+
+# 想加就隨時再疊上其他級別；重複執行是安全的，重複的卡片會被略過
+learnwhile seed data/anki-jlpt/n4.tsv
+learnwhile seed data/anki-jlpt/n1.tsv
+
+# 確認有匯入進去
+learnwhile cards
+```
+
+匯入一整級並不會把你淹沒：`new_cards_per_day` 上限（預設為 20）仍然會控制窗格每天引入多少張新卡，
+所以即使是 4,044 張卡的 N1 牌組，也是慢慢地一點一點餵給你。
 
 這些檔案是由 `extract` 子指令，從 [`5mdld/anki-jlpt-decks`](https://github.com/5mdld/anki-jlpt-decks)
 的原始匯出檔產生的：
