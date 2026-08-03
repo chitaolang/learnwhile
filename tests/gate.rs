@@ -8,6 +8,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixListener;
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::CommandCargoExt;
@@ -111,6 +112,29 @@ fn the_gate_allows_when_nothing_is_reviewable() {
     );
 }
 
+#[test]
+fn the_gate_allows_once_the_deck_is_exhausted() {
+    // The other half of "nothing reviewable": a deck emptied mid-Session by reviewing it, not one
+    // that started empty (spec §Testing: "an idle wait (empty or exhausted deck)").
+    let host = spawn_test_host();
+
+    // First prompt surfaces the only card; review it, emptying the deck.
+    assert_eq!(host.gate_query("s"), Verdict::Allow);
+    host.wait_for(PLACEHOLDER_CARD_FRONT);
+    host.press(REVEAL);
+    host.wait_for(PLACEHOLDER_CARD_BACK);
+    host.press(GOOD);
+    host.wait_for_absent(PLACEHOLDER_CARD_FRONT);
+
+    // The next prompt surfaces nothing, so no debt is incurred and it is allowed.
+    assert_eq!(host.gate_query("s"), Verdict::Allow);
+    assert!(
+        !host.pane().contains("Review to continue"),
+        "an exhausted deck owes nothing. Pane:\n{}",
+        host.pane()
+    );
+}
+
 // --- Fail-open and the block output, exercised on the real binary. ---
 
 const OPEN_PAYLOAD: &str =
@@ -126,11 +150,13 @@ struct HookRun {
     elapsed: Duration,
 }
 
-fn run_gated_hook(socket_dir: &std::path::Path, payload: &str) -> HookRun {
+fn run_hook(socket_dir: &std::path::Path, payload: &str, gated: bool) -> HookRun {
     let mut command = Command::cargo_bin("learnwhile").expect("built binary");
+    command.arg("hook");
+    if gated {
+        command.arg("--gate");
+    }
     command
-        .arg("hook")
-        .arg("--gate")
         .env("XDG_RUNTIME_DIR", socket_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -160,7 +186,7 @@ fn run_gated_hook(socket_dir: &std::path::Path, payload: &str) -> HookRun {
 #[test]
 fn gated_hook_fails_open_and_is_silent_with_no_host() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let run = run_gated_hook(dir.path(), OPEN_PAYLOAD);
+    let run = run_hook(dir.path(), OPEN_PAYLOAD, true);
     assert_eq!(
         run.exit_code,
         Some(0),
@@ -198,12 +224,18 @@ fn gated_hook_prints_the_block_verdict_when_the_host_blocks() {
     // Give the fake host a moment to bind before the hook connects.
     std::thread::sleep(Duration::from_millis(50));
 
-    let run = run_gated_hook(dir.path(), OPEN_PAYLOAD);
+    let run = run_hook(dir.path(), OPEN_PAYLOAD, true);
     assert_eq!(run.exit_code, Some(0), "a blocked hook still exits 0");
     assert!(
         run.stdout.contains(r#""decision":"block""#),
         "a block verdict must print the block decision, got: {:?}",
         run.stdout
+    );
+    // The gated round-trip stays within a bounded budget (spec §Testing, in the spirit of ADR-0008).
+    assert!(
+        run.elapsed < BUDGET,
+        "the gate round-trip took {:?}, over the {BUDGET:?} budget",
+        run.elapsed
     );
 }
 
@@ -213,11 +245,63 @@ fn gated_hook_is_silent_when_the_host_allows() {
     fake_host_replying(dir.path().join("learnwhile.sock"), Verdict::Allow);
     std::thread::sleep(Duration::from_millis(50));
 
-    let run = run_gated_hook(dir.path(), OPEN_PAYLOAD);
+    let run = run_hook(dir.path(), OPEN_PAYLOAD, true);
     assert_eq!(run.exit_code, Some(0));
     assert!(
         run.stdout.trim().is_empty(),
         "an allowed prompt must not be blocked, got stdout: {:?}",
         run.stdout
+    );
+    assert!(
+        run.elapsed < BUDGET,
+        "the gate round-trip took {:?}, over the {BUDGET:?} budget",
+        run.elapsed
+    );
+}
+
+/// A fake host that captures the first line it receives and never replies, so a test can inspect
+/// which frame the hook sent without the hook expecting an answer.
+fn fake_host_capturing(socket_path: std::path::PathBuf) -> Receiver<String> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let listener = UnixListener::bind(&socket_path).expect("bind fake host");
+        if let Ok((stream, _)) = listener.accept() {
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            let _ = reader.read_line(&mut line);
+            let _ = tx.send(line);
+            // Hold the connection briefly so the client's write completes; send no reply.
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    rx
+}
+
+#[test]
+fn an_ungated_hook_makes_no_round_trip() {
+    // Without --gate, the hook fire-and-forgets a one-way trigger_open and exits, never waiting for
+    // a reply (spec §Opt-in: "the gate-off path stays byte-for-byte the v1 cold path").
+    let dir = tempfile::tempdir().expect("temp dir");
+    let received = fake_host_capturing(dir.path().join("learnwhile.sock"));
+    std::thread::sleep(Duration::from_millis(50));
+
+    let run = run_hook(dir.path(), OPEN_PAYLOAD, false);
+    assert_eq!(run.exit_code, Some(0));
+    assert!(
+        run.stdout.trim().is_empty(),
+        "an ungated hook never blocks, got stdout: {:?}",
+        run.stdout
+    );
+
+    let frame = received
+        .recv_timeout(BUDGET)
+        .expect("the host should have received a frame");
+    assert!(
+        frame.contains(r#""type":"trigger_open""#),
+        "gate-off must send a one-way trigger_open, not a gate query, got: {frame}"
+    );
+    assert!(
+        !frame.contains("gate_query"),
+        "gate-off must not open a request/response, got: {frame}"
     );
 }
