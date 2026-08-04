@@ -152,7 +152,9 @@ learnwhile extract notes.csv [out-dir]   # writes n1.tsv .. n5.tsv; out-dir defa
 ```
 
 It reads the deck's tab-separated source and writes one `front<TAB>back` file per level, ready for
-`seed`. Source data is CC BY-NC 4.0, so the decks carry the same license. See
+`seed`. The source deck is by **egg rolls**, licensed
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), and the derived decks carry the
+same license (credit egg rolls, non-commercial use only). Full attribution is in
 [`data/anki-jlpt/README.md`](./data/anki-jlpt/README.md).
 
 ## Inspecting and tuning
@@ -419,7 +421,8 @@ learnwhile extract notes.csv [out-dir]   # 產生 n1.tsv .. n5.tsv；out-dir 預
 ```
 
 它會讀取牌組以 tab 分隔的原始檔，為每個級別各寫出一個 `front<TAB>back` 檔案，可直接用於 `seed`。
-原始資料採用 CC BY-NC 4.0 授權，因此這些牌組也沿用同一份授權。詳見
+原始牌組由 **egg rolls** 製作，採用 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+授權，這些衍生牌組也沿用同一份授權（須署名 egg rolls，僅限非商業使用）。完整署名見
 [`data/anki-jlpt/README.md`](./data/anki-jlpt/README.md)。
 
 ## 檢視與調整

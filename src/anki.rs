@@ -14,7 +14,7 @@
 //! reading is pure kana; katakana loanwords keep a latin etymology in the reading
 //! column, so they stay bare. Backs are one line because `parse_tsv` is line-based.
 //!
-//! Source data is CC BY-NC 4.0 (© 5mdld/anki-jlpt-decks); see
+//! Source data is © egg rolls (https://github.com/5mdld/anki-jlpt-decks), CC BY-NC 4.0; see
 //! `data/anki-jlpt/README.md`.
 
 // 0-based columns per the export header (#notetype 0, #deck 1, #tags 38).

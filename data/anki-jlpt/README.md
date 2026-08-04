@@ -42,6 +42,18 @@ learnwhile extract notes.csv data/anki-jlpt
 
 ## License and attribution
 
-Source data © [`5mdld/anki-jlpt-decks`](https://github.com/5mdld/anki-jlpt-decks), licensed
-**CC BY-NC 4.0**. These derived TSVs carry the same license: attribution required, non-commercial
-use only.
+The card data is derived from **【egg rolls】JLPT N1～N5 一万词 v3.5** (the `eggrolls-JLPT10k`
+deck), created by **egg rolls** and published at
+<https://github.com/5mdld/anki-jlpt-decks>. It is licensed under
+[Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/).
+The upstream author's terms require crediting **egg rolls** as the original author and linking the
+source repository.
+
+**Modifications.** The upstream Tab-separated source export was transformed into these per-level
+`front<TAB>back` TSVs by `learnwhile extract`: only the vocabulary word, kana reading, pitch accent,
+part of speech, and traditional-Chinese definition are kept and reformatted as Anki furigana
+notation. The audio, example sentences, and simplified-Chinese fields are dropped.
+
+These derived files carry the same **CC BY-NC 4.0** license. Keep this attribution to **egg rolls**
+and the [source repository](https://github.com/5mdld/anki-jlpt-decks), and use them for
+non-commercial purposes only.
