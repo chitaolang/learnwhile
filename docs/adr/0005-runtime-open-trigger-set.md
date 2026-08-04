@@ -6,8 +6,8 @@ while the developer is still waiting on another. Card visibility must reflect ag
 idleness, not any single agent.
 
 **Decision.** The Runtime maintains a set of currently-open Triggers, keyed by adapter and
-agent session. Opening a Trigger adds an entry; closing it (Stop / PermissionRequest /
-Elicitation) removes that entry. The developer is "waiting" exactly while the set is
+agent session. Opening a Trigger adds an entry; closing it (Stop / Notification) removes
+that entry. The developer is "waiting" exactly while the set is
 non-empty: a card is surfaced while non-empty and cleared when it becomes empty.
 
 **Consequences.** Runtime state is a set/refcount, not a single slot. Adapters must send a

@@ -93,13 +93,6 @@ JSON on stdin and decides for itself:
 | `Notification` | closes — the agent wants permission or input |
 | anything else | ignored — not a handoff boundary |
 
-> **Note on the docs.** [ADR-0001](./docs/adr/0001-agent-hook-trigger-passive-surface.md) and the
-> v1 spec name `PermissionRequest` and `Elicitation` as the closing events. Neither exists in
-> Claude Code — the real events are `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`,
-> `SubagentStop`, `SessionStart`, `SessionEnd`, `PreCompact`, and `Notification`, and the
-> permission prompt surfaces as `Notification`. The code above is correct; those documents need
-> amending to match.
-
 ## Seed a deck
 
 Cards come from a tab-separated file, one card per line: the front, a tab, then the back.
@@ -369,12 +362,6 @@ usage: learnwhile [host|hook|seed|config|cards|extract]
 | `Stop` | 關閉 —— 代理完成了這一輪 |
 | `Notification` | 關閉 —— 代理需要權限或輸入 |
 | 其他事件 | 忽略 —— 那不是交接的分界點 |
-
-> **關於文件的說明。** [ADR-0001](./docs/adr/0001-agent-hook-trigger-passive-surface.md) 與 v1
-> 規格把 `PermissionRequest` 和 `Elicitation` 列為關閉事件，但這兩個事件在 Claude Code 中並不
-> 存在 —— 實際的事件是 `PreToolUse`、`PostToolUse`、`UserPromptSubmit`、`Stop`、`SubagentStop`、
-> `SessionStart`、`SessionEnd`、`PreCompact` 與 `Notification`，而權限提示是以 `Notification`
-> 的形式出現。上面的設定是正確的；需要修正的是那兩份文件。
 
 ## 匯入一副牌
 

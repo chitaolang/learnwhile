@@ -208,7 +208,7 @@ arrival — drains expired entries. Expiry is not refreshed on later frames, sin
 traffic exists to refresh from.
 
 **Claude Code adapter.** A hook command. Opens a Trigger on `UserPromptSubmit`; closes on the
-first of `Stop`, `PermissionRequest`, or `Elicitation` (ADR-0001). It reads Claude Code's hook
+first of `Stop` or `Notification` (ADR-0001). It reads Claude Code's hook
 JSON from stdin to obtain the session id, connects with a tight timeout, writes one frame,
 and exits 0 unconditionally — including on connect failure, timeout, malformed input, or
 panic. It holds no learning state and never writes to storage.

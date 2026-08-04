@@ -39,13 +39,8 @@ const UNKNOWN_SESSION: &str = "unknown-session";
 /// Map a Claude Code `hook_event_name` onto a Trigger transition.
 ///
 /// A Trigger opens when the developer hands off and closes when the agent needs them back
-/// (ADR-0001). Anything not named here is not a handoff boundary and is ignored.
-///
-/// NOTE: ADR-0001 and the v1 spec name `PermissionRequest` and `Elicitation` as close events.
-/// Neither exists in Claude Code — the valid events are PreToolUse, PostToolUse,
-/// UserPromptSubmit, Stop, SubagentStop, SessionStart, SessionEnd, and Notification. The
-/// permission prompt surfaces as `Notification` (matcher `permission_prompt`), so that is what
-/// closes a Trigger here. The ADR needs amending to match; this comment is the marker.
+/// (ADR-0001). Anything not named here is not a handoff boundary and is ignored. The permission
+/// prompt surfaces as `Notification` (matcher `permission_prompt`), so that is what closes here.
 pub fn transition_for(event_name: &str) -> Option<FrameType> {
     match event_name {
         // The developer has handed control to the agent.

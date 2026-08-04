@@ -44,8 +44,8 @@ carries an unknown `v` is dropped without killing the accept loop. A duplicate o
 and a close for an unknown key is ignored. Overlapping Triggers hold the card until both close. A
 Trigger whose close never arrives expires on the sweep. The quit key restores the terminal.
 
-**Relies on.** ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009. (The close event in practice is
-`Notification`, not the `PermissionRequest`/`Elicitation` the early spec named; see the root README.)
+**Relies on.** ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009. (A Trigger closes on `Stop` or
+`Notification`, the latter being how Claude Code surfaces a permission prompt.)
 
 ## M2 Cards and Reviews
 

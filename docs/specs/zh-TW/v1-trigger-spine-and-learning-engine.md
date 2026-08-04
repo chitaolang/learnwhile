@@ -99,7 +99,7 @@ Learning module 必須能以 injected clock 和 injected storage handle 建構�
 
 **Lost-close recovery。** 解決 DESIGN_DRAFT §13 的 crash-recovery gap；見 ADR-0006。每個 open Trigger 都帶有從 open 起算的 expiry，預設 30 分鐘，並以 `trigger_expiry_seconds` 保存在 `config`。Sweep 由自己的週期 timer 執行，而不是由 frame arrival 驅動，並排掉 expired entries。Expiry 不會因後續 frame refresh，因為沒有 mid-turn traffic 可用於 refresh。
 
-**Claude Code adapter。** Hook command。在 `UserPromptSubmit` 開啟 Trigger；在 `Stop`、`PermissionRequest` 或 `Elicitation` 中第一個出現者關閉 Trigger（ADR-0001）。它從 stdin 讀 Claude Code 的 hook JSON 取得 session id，以很短的 timeout 連線，寫出一個 frame，並無條件 exit 0，包括 connect failure、timeout、malformed input 或 panic。它不持有 learning state，也永遠不寫 storage。
+**Claude Code adapter。** Hook command。在 `UserPromptSubmit` 開啟 Trigger；在 `Stop` 或 `Notification` 中第一個出現者關閉 Trigger（ADR-0001）。它從 stdin 讀 Claude Code 的 hook JSON 取得 session id，以很短的 timeout 連線，寫出一個 frame，並無條件 exit 0，包括 connect failure、timeout、malformed input 或 panic。它不持有 learning state，也永遠不寫 storage。
 
 **Card selection。** 依 ADR-0002 的嚴格順序，並在每次 surfacing 時重新評估：真正到期的卡片；否則如果今天 introductions 尚未達每日上限，就選新卡；否則 idle 狀態。絕不把尚未到期的卡片提前拉出來。「Today」依 injected clock 在使用者 local timezone 中解析。
 

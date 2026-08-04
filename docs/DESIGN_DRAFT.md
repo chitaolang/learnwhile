@@ -134,7 +134,7 @@ Translate one agent's raw events into Triggers and forward them to the host.
 **Behavior**
 
 - A Trigger **opens** on `UserPromptSubmit` (covering the agent's thinking and tool
-  time) and **closes** on the first of `Stop`, `PermissionRequest`, or `Elicitation`
+  time) and **closes** on the first of `Stop` or `Notification`
   — i.e. the moment the agent needs the developer back (ADR-0001).
 - The adapter is a hook command: it connects to the host's unix socket, sends the
   event fire-and-forget with a tight timeout, and swallows all errors (always exits
