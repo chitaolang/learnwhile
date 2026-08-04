@@ -38,4 +38,9 @@ case ":$PATH:" in
 esac
 
 echo
-echo "Done. Try:  $BIN seed data/anki-jlpt/n5.tsv"
+echo "Done. Next steps:"
+echo "  1. Wire up the Claude Code hook in ~/.claude/settings.json so cards appear during waits."
+echo "     See the \"Wire up the Claude Code hook\" section of the README; the binary alone does"
+echo "     nothing until the hook is connected."
+echo "  2. Seed a deck:  $BIN seed data/anki-jlpt/n5.tsv"
+echo "  3. Run it:       $BIN"
