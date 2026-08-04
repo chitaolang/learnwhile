@@ -38,6 +38,33 @@ or set `PREFIX`):
 To remove it later, run `./scripts/uninstall.sh`. Add `--purge` to also delete your cards, review
 history, logs, and socket.
 
+## Command reference
+
+`learnwhile` is one binary with several subcommands. Each has a fuller walkthrough in the sections
+below.
+
+| Command | What it does |
+|---|---|
+| `learnwhile`<br>`learnwhile host` | Start the review pane (the long-lived host). |
+| `learnwhile hook` | The Claude Code hook adapter: read the event from stdin, then open or close a Trigger. Always exits 0. |
+| `learnwhile hook --open` | Force a Trigger open, ignoring the event name. |
+| `learnwhile hook --close` | Force a Trigger close, ignoring the event name. |
+| `learnwhile hook --gate` | Hook adapter with the Prompt Gate on: hold your next prompt until one Review is done. |
+| `learnwhile seed <file.tsv>` | Import cards from a tab-separated file. Re-running skips cards already present. |
+| `learnwhile extract <notes.csv> [out-dir]` | Build JLPT seed decks from an anki-jlpt-decks source export. `out-dir` defaults to the current directory. |
+| `learnwhile config` | List every setting and its value. |
+| `learnwhile config set <key> <value>` | Change one setting. Rejects an unknown key or an unusable value. |
+| `learnwhile cards` | List every card and how it is scheduled. |
+
+With no subcommand, `learnwhile` starts the host. An unknown one prints the usage line and exits
+non-zero:
+
+```sh
+$ learnwhile wat
+learnwhile: unknown subcommand "wat"
+usage: learnwhile [host|hook|seed|config|cards|extract]
+```
+
 ## Wire up the Claude Code hook
 
 Add this to `~/.claude/settings.json`. A Trigger opens when you hand off and closes when the
@@ -307,6 +334,31 @@ cargo build --release
 
 之後要移除，執行 `./scripts/uninstall.sh`。加上 `--purge` 會連同你的卡片、複習歷史、log
 與 socket 一併刪除。
+
+## 指令總覽
+
+`learnwhile` 是一個帶有數個子指令的執行檔。每個子指令在下面的章節都有更完整的說明。
+
+| 指令 | 作用 |
+|---|---|
+| `learnwhile`<br>`learnwhile host` | 啟動複習窗格（長駐的 host）。 |
+| `learnwhile hook` | Claude Code 的 hook 轉接器：從標準輸入讀取事件，接著開啟或關閉一個 Trigger。永遠以結束碼 0 收工。 |
+| `learnwhile hook --open` | 強制開啟一個 Trigger，忽略事件名稱。 |
+| `learnwhile hook --close` | 強制關閉一個 Trigger，忽略事件名稱。 |
+| `learnwhile hook --gate` | 開啟 Prompt Gate 的 hook 轉接器：壓住你的下一個 prompt，直到你完成一次複習。 |
+| `learnwhile seed <file.tsv>` | 從以 tab 分隔的檔案匯入卡片。重複執行會略過已存在的卡片。 |
+| `learnwhile extract <notes.csv> [out-dir]` | 從 anki-jlpt-decks 的原始匯出檔建立 JLPT 匯入牌組。`out-dir` 預設為當前目錄。 |
+| `learnwhile config` | 列出每一項設定及其值。 |
+| `learnwhile config set <key> <value>` | 修改一項設定。會拒絕未知的鍵或無法使用的值。 |
+| `learnwhile cards` | 列出每一張卡片，以及它的排程狀況。 |
+
+沒有帶子指令時，`learnwhile` 會啟動 host。帶了未知的子指令時，會印出用法並以非 0 結束碼結束：
+
+```sh
+$ learnwhile wat
+learnwhile: unknown subcommand "wat"
+usage: learnwhile [host|hook|seed|config|cards|extract]
+```
 
 ## 設定 Claude Code hook
 
