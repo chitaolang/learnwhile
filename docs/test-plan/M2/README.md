@@ -1,6 +1,6 @@
 # M2 manual test plan — Cards and Reviews
 
-A by-hand checklist for the [M2 milestone](../../milestones/M2-cards-and-reviews.md): seed a deck,
+A by-hand checklist for the [M2 milestone](../../milestones/README.md#m2-cards-and-reviews): seed a deck,
 do real Reviews during a wait, and confirm every rating persists and reschedules the card by FSRS.
 
 The automated suite (`cargo test`) already covers all of this. This plan is for dogfooding against

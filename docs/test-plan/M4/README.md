@@ -1,6 +1,6 @@
 # M4 manual test plan — Session continuity
 
-A by-hand checklist for the [M4 milestone](../../milestones/M4-session-continuity.md): a review
+A by-hand checklist for the [M4 milestone](../../milestones/README.md#m4-session-continuity): a review
 survives the rhythm of real agent use. A card you were halfway through is still there on the next
 wait, and a card you failed comes back for a second attempt before the sitting ends.
 

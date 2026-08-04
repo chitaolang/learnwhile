@@ -1,6 +1,6 @@
 # M6 manual test plan — Furigana display
 
-A by-hand checklist for the [M6 milestone](../../milestones/M6-furigana-display.md): seed a Japanese
+A by-hand checklist for the [M6 milestone](../../milestones/README.md#m6-furigana-display): seed a Japanese
 deck with inline readings and confirm the reading is hidden on the question side and stacked over
 its kanji on reveal, that unannotated cards render exactly as before, and that malformed notation
 degrades to literal text without crashing.

@@ -1,6 +1,6 @@
 # M7 manual test plan — Prompt Gate
 
-A by-hand checklist for the [M7 milestone](../../milestones/M7-prompt-gate.md): opt into the Prompt
+A by-hand checklist for the [M7 milestone](../../milestones/README.md#m7-prompt-gate): opt into the Prompt
 Gate and confirm that an owed Review holds the next prompt, that the owed card is payable from the
 idle pane, that completing a Review lets the prompt through, and that with the gate off (or no host)
 nothing ever blocks.

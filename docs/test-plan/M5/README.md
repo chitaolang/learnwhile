@@ -1,6 +1,6 @@
 # M5 manual test plan — Hardening and install
 
-A by-hand checklist for the [M5 milestone](../../milestones/M5-hardening-and-install.md): install
+A by-hand checklist for the [M5 milestone](../../milestones/README.md#m5-hardening-and-install): install
 LearnWhile, leave it running, and work out what happened when something misbehaves — without
 reading the source.
 

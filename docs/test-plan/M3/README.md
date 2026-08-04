@@ -1,6 +1,6 @@
 # M3 manual test plan — Honest scheduling
 
-A by-hand checklist for the [M3 milestone](../../milestones/M3-honest-scheduling.md): a developer
+A by-hand checklist for the [M3 milestone](../../milestones/README.md#m3-honest-scheduling): a developer
 can trust the pane to show a genuinely due card, else a new card within the day's cap, else an idle
 state that explains itself, and never a card pulled forward ahead of its due date.
 
