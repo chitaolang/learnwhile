@@ -7,15 +7,12 @@ When you hand work to your agent, a card appears in a pane beside it. When the a
 back, the card clears. The pane never steals focus, and nothing is ever blocked: if LearnWhile
 is not running, your agent behaves exactly as it always has.
 
-**Status: v1 feature-complete (M1–M5), plus two post-v1 additions (M6–M7).** Seed a deck from a file and do real Reviews during your
-waits: question, reveal, rate. Every rating is persisted and the card rescheduled by FSRS, with
-genuinely due cards shown before new ones (never pulled forward), a daily new-card cap, an idle
-pane that shows what is due, mid-review resume across waits, and same-day re-attempts of failed
-cards within a sitting. A second host refuses to start, a killed host's stale socket is recovered
-on the next run, and diagnostics go to a rotating log file. Beyond v1, Japanese cards can carry
-furigana readings that appear over the kanji when you reveal (M6), and an opt-in Prompt Gate can
-hold your next prompt until you finish one Review (M7). See
-[`docs/milestones/`](./docs/milestones/README.md).
+**Status: v1 feature-complete (M1–M5), plus two post-v1 additions (M6–M7).** Seed a deck from a
+file and do real Reviews during your waits: question, reveal, rate. Ratings persist and cards are
+rescheduled by FSRS. Beyond v1, Japanese cards can carry furigana readings shown over the kanji on
+reveal (M6), and an opt-in Prompt Gate can hold your next prompt until you finish one Review (M7).
+The sections below cover each feature; [`docs/milestones/`](./docs/milestones/README.md) has the
+full history.
 
 ## Install
 
@@ -103,9 +100,6 @@ JSON on stdin and decides for itself:
 > permission prompt surfaces as `Notification`. The code above is correct; those documents need
 > amending to match.
 
-If you would rather be explicit than let the adapter infer, `learnwhile hook --open` and
-`learnwhile hook --close` force the transition regardless of the event name.
-
 ## Seed a deck
 
 Cards come from a tab-separated file, one card per line: the front, a tab, then the back.
@@ -170,16 +164,8 @@ It reads the deck's tab-separated source and writes one `front<TAB>back` file pe
 
 ## Inspecting and tuning
 
-Two subcommands read the same database. Run them with the host stopped or running, it makes no
-difference:
-
-```sh
-learnwhile config                           # list settings
-learnwhile config set new_cards_per_day 30  # change one
-learnwhile cards                            # list the deck and how each card is scheduled
-```
-
-The settings are:
+`config` and `cards` read the same database, whether or not the host is running. The settings
+`config` lists and `config set` changes are:
 
 | Key | Default | What it does |
 |---|---|---|
@@ -281,10 +267,6 @@ cargo clippy --all-targets
 cargo fmt
 ```
 
-Tests boot the host in-process through one seam, then drive it by writing the same frames the
-hook writes down a real unix socket, and assert on what the pane displays. No test reaches into
-the open-Trigger set or the event loop directly.
-
 ## Documentation
 
 - [`CONTEXT.md`](./CONTEXT.md) — the glossary. Terms here are load-bearing.
@@ -305,14 +287,11 @@ the open-Trigger set or the event loop directly.
 當你把工作交給代理時，卡片會出現在旁邊的窗格裡；當代理需要你回來時，卡片就會清掉。這個窗格
 永遠不會搶走焦點，也永遠不會擋住你：如果 LearnWhile 沒有在執行，你的代理行為就和平常完全一樣。
 
-**目前狀態：v1 功能完成（M1–M5），另有兩項 v1 之後的新增（M6–M7）。** 你可以從檔案匯入一副牌，並在等待的空檔做真正的複習
-（Review）：看題目、翻答案、評分。每一次評分都會被持久化，卡片也會由 FSRS 重新排程；真正到期
-的卡片會排在新卡之前（永遠不會提前拉出來）、有每日新卡上限、有顯示到期狀況的閒置窗格、複習能
-跨多次等待接續，並且在同一次 sitting 內對失敗的卡片提供當日重試。第二個 host 會拒絕啟動，被
-強制關閉的 host 留下的 stale socket 會在下次啟動時自動回復，診斷訊息則寫入每日輪替的 log 檔。
-在 v1 之外，日文卡片可以帶 furigana 讀音，翻答案時會顯示在漢字上方（M6）；另有一個可選擇啟用的
-Prompt Gate，能在你完成一次複習之前，先壓住你的下一個 prompt（M7）。詳見
-[`docs/milestones/`](./docs/milestones/README.md)。
+**目前狀態：v1 功能完成（M1–M5），另有兩項 v1 之後的新增（M6–M7）。** 你可以從檔案匯入一副牌，
+並在等待的空檔做真正的複習（Review）：看題目、翻答案、評分。每一次評分都會被持久化，卡片也會由
+FSRS 重新排程。在 v1 之外，日文卡片可以帶 furigana 讀音，翻答案時顯示在漢字上方（M6）；另有一個
+可選擇啟用的 Prompt Gate，能在你完成一次複習之前先壓住你的下一個 prompt（M7）。後面的章節會逐一
+介紹各項功能；完整歷程詳見 [`docs/milestones/`](./docs/milestones/README.md)。
 
 ## 安裝
 
@@ -397,9 +376,6 @@ usage: learnwhile [host|hook|seed|config|cards|extract]
 > `SessionStart`、`SessionEnd`、`PreCompact` 與 `Notification`，而權限提示是以 `Notification`
 > 的形式出現。上面的設定是正確的；需要修正的是那兩份文件。
 
-如果你寧可明確指定、而不想讓轉接器自己推斷，可以用 `learnwhile hook --open` 和
-`learnwhile hook --close` 強制指定要送出的轉換，忽略事件名稱。
-
 ## 匯入一副牌
 
 卡片來自一個以 tab 分隔的檔案，每行一張卡：正面、一個 tab，然後是背面。
@@ -461,15 +437,8 @@ learnwhile extract notes.csv [out-dir]   # 產生 n1.tsv .. n5.tsv；out-dir 預
 
 ## 檢視與調整
 
-有兩個子指令會讀取同一個資料庫。host 有沒有在執行都可以跑，沒有差別：
-
-```sh
-learnwhile config                           # 列出設定
-learnwhile config set new_cards_per_day 30  # 修改其中一項
-learnwhile cards                            # 列出牌組，以及每張卡片的排程狀況
-```
-
-設定項目如下：
+`config` 與 `cards` 會讀取同一個資料庫，host 有沒有在執行都可以跑。`config` 列出、`config set`
+修改的設定項目如下：
 
 | 鍵 | 預設值 | 作用 |
 |---|---|---|
@@ -565,10 +534,6 @@ cargo test      # 主機邊界測試，加上 fail-open 的子行程測試
 cargo clippy --all-targets
 cargo fmt
 ```
-
-測試會透過單一接縫（seam）在行程內啟動主機，接著用「與 hook 寫出的完全相同的訊框（frame）」
-寫進真正的 unix socket 來驅動它，並針對窗格顯示的內容做斷言。沒有任何測試會直接去碰開啟中的
-觸發集合（open-Trigger set）或事件迴圈。
 
 ## 文件
 
