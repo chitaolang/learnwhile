@@ -93,7 +93,7 @@ usage: learnwhile [host|hook|seed|config|cards|extract]
 ## Wire up the Claude Code hook
 
 Add this to `~/.claude/settings.json`. A Trigger opens when you hand off and closes when the
-agent needs you back:
+agent finishes its turn:
 
 ```json
 {
@@ -117,8 +117,8 @@ JSON on stdin and decides for itself:
 | Claude Code event | Trigger |
 |---|---|
 | `UserPromptSubmit` | opens — you have handed control to the agent |
-| `Stop` | closes — the agent finished its turn |
-| `Notification` | closes — the agent wants permission or input |
+| `Stop` | closes — the agent finished its whole turn (the only close) |
+| `Notification` | ignored — fires mid-turn on permission prompts and idle waits, so it is not the end of your wait |
 | anything else | ignored — not a handoff boundary |
 
 ## Seed a deck

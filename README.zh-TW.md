@@ -90,7 +90,7 @@ usage: learnwhile [host|hook|seed|config|cards|extract]
 
 ## 設定 Claude Code hook
 
-把下面這段加進 `~/.claude/settings.json`。當你把工作交出去時，觸發會開啟；當代理需要你回來時，
+把下面這段加進 `~/.claude/settings.json`。當你把工作交出去時，觸發會開啟；當代理完成這一輪時，
 觸發會關閉：
 
 ```json
@@ -115,8 +115,8 @@ usage: learnwhile [host|hook|seed|config|cards|extract]
 | Claude Code 事件 | 觸發（Trigger） |
 |---|---|
 | `UserPromptSubmit` | 開啟 —— 你已經把控制權交給代理 |
-| `Stop` | 關閉 —— 代理完成了這一輪 |
-| `Notification` | 關閉 —— 代理需要權限或輸入 |
+| `Stop` | 關閉 —— 代理完成了整輪回應（唯一的關閉時機） |
+| `Notification` | 忽略 —— 它會在回合中途因為權限詢問或閒置等待而觸發，並不是你這次等待的結束 |
 | 其他事件 | 忽略 —— 那不是交接的分界點 |
 
 ## 匯入一副牌

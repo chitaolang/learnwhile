@@ -38,19 +38,22 @@ const UNKNOWN_SESSION: &str = "unknown-session";
 
 /// Map a Claude Code `hook_event_name` onto a Trigger transition.
 ///
-/// A Trigger opens when the developer hands off and closes when the agent needs them back
-/// (ADR-0001). Anything not named here is not a handoff boundary and is ignored. The permission
-/// prompt surfaces as `Notification` (matcher `permission_prompt`), so that is what closes here.
+/// A Trigger opens when the developer hands off and closes only when the agent's whole turn ends
+/// (ADR-0001). `Stop` is that single close: Claude Code fires it once, when the agent has finished
+/// responding and is handing control back. `Notification` is deliberately not a close — it fires
+/// mid-turn on every permission prompt (and on idle waits), so closing there would clear the card
+/// while the prompt is still running. Anything else is not a handoff boundary either.
 pub fn transition_for(event_name: &str) -> Option<FrameType> {
     match event_name {
         // The developer has handed control to the agent.
         "UserPromptSubmit" => Some(FrameType::TriggerOpen),
-        // The agent has finished its turn.
+        // The agent has finished its whole turn and handed control back. This is the only close:
+        // it fires once, at the genuine end of the response, so the wait spans the entire prompt.
         "Stop" => Some(FrameType::TriggerClose),
-        // The agent needs the developer: a permission prompt or an idle input wait.
-        "Notification" => Some(FrameType::TriggerClose),
-        // Deliberately not a close: a subagent finishing does not hand control back to the
-        // developer, and treating it as one would clear a card mid-wait.
+        // Everything else is left open on purpose. `Notification` (a mid-turn permission prompt or
+        // idle wait) and a subagent finishing are not the end of the wait; closing on them would
+        // clear the card while the agent is still working. A lost `Stop` is caught by expiry
+        // (ADR-0006), so a Trigger cannot pin a card up forever.
         _ => None,
     }
 }
