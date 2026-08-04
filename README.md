@@ -35,6 +35,32 @@ or set `PREFIX`):
 To remove it later, run `./scripts/uninstall.sh`. Add `--purge` to also delete your cards, review
 history, logs, and socket.
 
+### Or let your AI agent install it
+
+LearnWhile is for people who already work with an AI coding agent, so the quickest setup is to hand
+the whole thing to that agent. From a clone of this repo, paste this prompt into Claude Code (or your
+agent of choice):
+
+> Install LearnWhile from this repository for me:
+> 1. Run `./scripts/install.sh` to build the release binary and put it on my PATH.
+> 2. Add the LearnWhile hook to my `~/.claude/settings.json` for the `UserPromptSubmit`, `Stop`, and
+>    `Notification` events, each running the command `learnwhile hook`. Merge into any hooks I
+>    already have instead of overwriting them, and show me the diff before saving.
+> 3. Seed the N5 deck: `learnwhile seed data/anki-jlpt/n5.tsv`.
+>
+> Do not start the host yourself, it is a full-screen TUI I will run in my own pane. When you are
+> done, tell me to restart this session and run `learnwhile` beside my agent.
+
+A few things to expect:
+
+- **Review the `settings.json` change.** The agent is editing your global agent config; skim the diff
+  before accepting, and confirm it merged into your existing hooks rather than replacing them.
+- **Restart the agent session** once the hooks are added, so Claude Code loads them.
+- **You start the host, not the agent.** `learnwhile` is an interactive full-screen pane; run it
+  yourself in a split beside your agent (see [Run](#run)). The agent cannot drive it for you.
+- Want the Prompt Gate? Tell the agent to use `learnwhile hook --gate` for `UserPromptSubmit`
+  instead (see [Prompt Gate](#prompt-gate-optional)).
+
 ## Command reference
 
 `learnwhile` is one binary with several subcommands. Each has a fuller walkthrough in the sections
@@ -308,6 +334,31 @@ cargo build --release
 
 之後要移除，執行 `./scripts/uninstall.sh`。加上 `--purge` 會連同你的卡片、複習歷史、log
 與 socket 一併刪除。
+
+### 或者讓 AI 代理替你安裝
+
+LearnWhile 本來就是給已經在用 AI 編碼代理的人用的，所以最快的安裝方式，就是把整件事交給那個代理。
+在這個 repo 的 clone 目錄下，把下面這段 prompt 貼給 Claude Code（或你慣用的代理）：
+
+> 請幫我從這個 repository 安裝 LearnWhile：
+> 1. 執行 `./scripts/install.sh`，建置 release 執行檔並放到我的 PATH 上。
+> 2. 把 LearnWhile hook 加進我的 `~/.claude/settings.json`，綁定 `UserPromptSubmit`、`Stop` 與
+>    `Notification` 三個事件，每個都執行 `learnwhile hook` 指令。請合併進我既有的 hooks、不要覆蓋，
+>    並在存檔前把 diff 給我看。
+> 3. 匯入 N5 牌組：`learnwhile seed data/anki-jlpt/n5.tsv`。
+>
+> 不要自己啟動 host，它是一個全螢幕 TUI，我會自己在我的窗格裡執行。完成後，提醒我重新啟動這個
+> session，並在代理旁邊執行 `learnwhile`。
+
+幾件要注意的事：
+
+- **檢查 `settings.json` 的變更。** 代理正在改你全域的代理設定；接受前先看一下 diff，確認它是合併
+  進你既有的 hooks，而不是取代它們。
+- **加完 hooks 後重新啟動代理 session**，Claude Code 才會載入它們。
+- **host 由你啟動，不是代理。** `learnwhile` 是互動式全螢幕窗格，請自己在代理旁邊的分割視窗執行
+  （見下方「執行」一節）。代理無法替你操作它。
+- 想改用 Prompt Gate？叫代理把 `UserPromptSubmit` 換成 `learnwhile hook --gate`（見下方
+  「Prompt Gate（選用）」一節）。
 
 ## 指令總覽
 
